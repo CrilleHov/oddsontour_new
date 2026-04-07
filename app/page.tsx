@@ -3,7 +3,7 @@ import Link from "next/link"
 import type { ComponentType } from "react"
 
 import { Card, CardContent } from "@/components/ui/card"
-import { Instagram, Trophy, CalendarDays, Banknote, Images, Timer, Users, Settings } from "lucide-react"
+import { Instagram, Trophy, CalendarDays, Banknote, Images, Timer, Users, Settings, BookOpen } from "lucide-react"
 
 export default function HomePage() {
   return (
@@ -24,7 +24,7 @@ export default function HomePage() {
 
         <div>
           <h1 className="text-3xl font-bold tracking-tight text-foreground text-balance">Odds on Tour</h1>
-          <p className="mt-1 text-muted-foreground">Race to Vallda 2026</p>
+          <p className="mt-1 text-muted-foreground">Race to Sand 2026</p>
         </div>
 
         <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
@@ -42,6 +42,15 @@ export default function HomePage() {
             <Instagram className="h-4 w-4" />
             Instagram
           </a>
+        
+          <a
+            href="https://www.tiktok.com/@oddsontour"
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-2 rounded-full bg-secondary px-4 py-2 text-sm font-medium text-secondary-foreground hover:bg-secondary/80"
+          >
+            TikTok
+          </a>
         </div>
       </section>
 
@@ -53,6 +62,7 @@ export default function HomePage() {
         <QuickLink href="/bilder" icon={Images} title="Bilder" desc="Lagbilder och minnen" />
         <QuickLink href="/countdown" icon={Timer} title="Countdown" desc="Nedräkning till finalen" />
         <QuickLink href="/spelare" icon={Users} title="Spelare" desc="Aktiva + historiska" />
+        <QuickLink href="/historia" icon={BookOpen} title="Historia & Info" desc="Historiska vinnare och ansvarsområden" />
       </section>
     </div>
   )
