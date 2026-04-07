@@ -572,7 +572,7 @@ export default function LeaderboardPage() {
                     <XAxis dataKey="datum" tick={{ fontSize: 12 }} />
                     <YAxis tick={{ fontSize: 12 }} />
                     <Tooltip
-                      formatter={(value) => [formatSigned(Number(value)), "Kumulativt mot par"]}
+                      formatter={(value, name) => [formatSigned(Number(value)), String(name)]}
                     />
                     <Legend />
                     {playersInChart.map((p, i) => (
