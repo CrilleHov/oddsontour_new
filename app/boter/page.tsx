@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { addFees } from "@/lib/actions"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -19,6 +19,8 @@ import { toast } from "sonner"
 import {
   BarChart,
   Bar,
+  LineChart,
+  Line,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -69,131 +71,112 @@ function isActive(v: PlayerRow["aktiv"]) {
   return Number(v) === 1
 }
 
-function playerDisplayName(p: PlayerRow) {
-  const full = (p.namn_full ?? "").trim()
-  if (full) return full
-  return p.spelarnamn
+function playerNickname(p: PlayerRow) {
+  return (p.spelarnamn ?? "").trim()
+}
+
+function formatDateSv(dateString: string | null | undefined) {
+  if (!dateString) return null
+
+  // Säker mot timezone-problem för datumsträngar som YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+    const [y, m, d] = dateString.split("-")
+    return `${y}-${m}-${d}`
+  }
+
+  const d = new Date(dateString)
+  if (Number.isNaN(d.getTime())) return dateString
+  return d.toLocaleDateString("sv-SE")
 }
 
 export default function BoterPage() {
   const supabase = useMemo(() => createClient(), [])
 
-  // Aktiva spelare (för formulär)
   const [activePlayers, setActivePlayers] = useState<string[]>([])
-
-  // Fees för valt år (för visning)
   const [fees, setFees] = useState<FeeRow[]>([])
   const [years, setYears] = useState<number[]>([])
   const [selectedYear, setSelectedYear] = useState<number | null>(null)
 
-  // Senaste total-kassa
   const [latestTotal, setLatestTotal] = useState<TotRow | null>(null)
+  const [totalHistory, setTotalHistory] = useState<TotRow[]>([])
 
   const [loading, setLoading] = useState(true)
   const [loadingFees, setLoadingFees] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Form
   const [formFees, setFormFees] = useState<Record<string, number>>({})
   const [password, setPassword] = useState("")
   const [submitting, setSubmitting] = useState(false)
 
-  // Nytt: registreringsår (gäller för alla inputs)
   const [regYear, setRegYear] = useState<number | null>(null)
 
-  // 1) Meta: aktiva spelare + år + senaste total
-  useEffect(() => {
-    let cancelled = false
+  const loadMeta = useCallback(async () => {
+    setError(null)
 
-    async function loadMeta() {
-      setLoading(true)
-      setError(null)
+    const [
+      { data: playersData, error: playersError },
+      { data: yearsData, error: yearsError },
+      { data: totData, error: totError },
+    ] = await Promise.all([
+      supabase
+        .from(PLAYERS_TABLE)
+        .select("spelarnamn, namn_full, aktiv")
+        .eq("aktiv", 1)
+        .order("spelarnamn", { ascending: true }),
 
-      try {
-        const [
-          { data: playersData, error: playersError },
-          { data: yearsData, error: yearsError },
-          { data: totData, error: totError },
-        ] = await Promise.all([
-          // Endast aktiva spelare
-          supabase
-            .from(PLAYERS_TABLE)
-            .select("spelarnamn, namn_full, aktiv")
-            .eq("aktiv", 1)
-            .order("namn_full", { ascending: true, nullsFirst: false }),
+      supabase.from(FEES_TABLE).select("ar").order("ar", { ascending: false }),
 
-          // År som finns i fees
-          supabase.from(FEES_TABLE).select("ar").order("ar", { ascending: false }),
+      supabase
+        .from(TOT_TABLE)
+        .select("datum, tot")
+        .order("datum", { ascending: true }),
+    ])
 
-          // Senaste totalen
-          supabase
-            .from(TOT_TABLE)
-            .select("datum, tot")
-            .order("datum", { ascending: false })
-            .limit(1),
-        ])
+    if (playersError) throw playersError
+    if (yearsError) throw yearsError
+    if (totError) throw totError
 
-        if (cancelled) return
+    const active = ((playersData ?? []) as PlayerRow[])
+      .filter((p) => isActive(p.aktiv))
+      .map(playerNickname)
+      .filter(Boolean)
 
-        if (playersError) throw playersError
-        if (yearsError) throw yearsError
-        if (totError) throw totError
+    setActivePlayers(active)
 
-        const active = ((playersData ?? []) as PlayerRow[])
-          .filter((p) => isActive(p.aktiv))
-          .map(playerDisplayName)
-
-        setActivePlayers(active)
-
-        // init form för aktiva spelare
-        setFormFees((prev) => {
-          const next = { ...prev }
-          for (const n of active) {
-            if (next[n] === undefined) next[n] = 0
-          }
-          // ta bort ev gamla nycklar (historiska) om du vill:
-          for (const k of Object.keys(next)) {
-            if (!active.includes(k)) delete next[k]
-          }
-          return next
-        })
-
-        // unika år
-        const uniqYears = Array.from(
-          new Set((yearsData ?? []).map((r: any) => Number(r.ar)).filter((x) => Number.isFinite(x)))
-        ).sort((a, b) => b - a)
-
-        // Se till att nuvarande år alltid finns som val (även om inga böter registrerade än)
-        const currentYear = new Date().getFullYear()
-        const yearOptions = Array.from(new Set([...uniqYears, currentYear])).sort((a, b) => b - a)
-
-        setYears(yearOptions)
-        setSelectedYear((prev) => prev ?? yearOptions[0] ?? null)
-
-        // default registreringsår = currentYear om du vill, annars senaste året
-        setRegYear((prev) => prev ?? currentYear)
-
-        const latest = (totData ?? [])[0] as TotRow | undefined
-        setLatestTotal(latest ?? null)
-      } catch (e: any) {
-        setError(e?.message ?? String(e))
-      } finally {
-        setLoading(false)
+    setFormFees((prev) => {
+      const next: Record<string, number> = {}
+      for (const player of active) {
+        next[player] = prev[player] ?? 0
       }
-    }
+      return next
+    })
 
-    loadMeta()
-    return () => {
-      cancelled = true
-    }
+    const uniqYears = Array.from(
+      new Set(
+        (yearsData ?? [])
+          .map((r: any) => Number(r.ar))
+          .filter((x) => Number.isFinite(x))
+      )
+    ).sort((a, b) => b - a)
+
+    const currentYear = new Date().getFullYear()
+    const yearOptions = Array.from(new Set([...uniqYears, currentYear])).sort((a, b) => b - a)
+
+    setYears(yearOptions)
+    setSelectedYear((prev) => prev ?? yearOptions[0] ?? currentYear)
+    setRegYear((prev) => prev ?? currentYear)
+
+    const totalsHistory = ((totData ?? []) as TotRow[]).map((r) => ({
+      datum: r.datum,
+      tot: Number(r.tot ?? 0),
+    }))
+
+    setTotalHistory(totalsHistory)
+    setLatestTotal(totalsHistory.length > 0 ? totalsHistory[totalsHistory.length - 1] : null)
   }, [supabase])
 
-  // 2) Hämta fees för selectedYear (visning)
-  useEffect(() => {
-    if (!selectedYear) return
-    let cancelled = false
-
-    async function loadFeesForYear() {
+  const loadFeesForYear = useCallback(
+    async (year: number) => {
       setLoadingFees(true)
       setError(null)
 
@@ -201,44 +184,84 @@ export default function BoterPage() {
         const { data, error } = await supabase
           .from(FEES_TABLE)
           .select("spelare, belopp:bötesbelopp, ar")
-          .eq("ar", selectedYear)
+          .eq("ar", year)
 
-        if (cancelled) return
         if (error) throw error
 
-        setFees((data ?? []) as FeeRow[])
+        setFees(
+          ((data ?? []) as FeeRow[]).map((r) => ({
+            spelare: r.spelare,
+            belopp: Number(r.belopp ?? 0),
+            ar: Number(r.ar),
+          }))
+        )
       } catch (e: any) {
-        if (cancelled) return
         setError(e?.message ?? String(e))
         setFees([])
       } finally {
-        if (!cancelled) setLoadingFees(false)
+        setLoadingFees(false)
+      }
+    },
+    [supabase]
+  )
+
+  useEffect(() => {
+    let mounted = true
+
+    async function init() {
+      setLoading(true)
+      try {
+        await loadMeta()
+      } catch (e: any) {
+        if (mounted) setError(e?.message ?? String(e))
+      } finally {
+        if (mounted) setLoading(false)
       }
     }
 
-    loadFeesForYear()
+    init()
+
     return () => {
-      cancelled = true
+      mounted = false
     }
-  }, [supabase, selectedYear])
+  }, [loadMeta])
+
+  useEffect(() => {
+    if (!selectedYear) return
+    loadFeesForYear(selectedYear)
+  }, [selectedYear, loadFeesForYear])
 
   const totals = useMemo(() => {
     const map = new Map<string, number>()
+
     for (const f of fees) {
       map.set(f.spelare, (map.get(f.spelare) ?? 0) + Number(f.belopp ?? 0))
     }
 
     const rows = Array.from(map.entries())
-      .map(([spelare, total]) => ({ spelare, total: Math.round(total) }))
+      .map(([spelare, total]) => ({
+        spelare,
+        total: Math.round(total),
+      }))
       .sort((a, b) => b.total - a.total)
 
-    const totalAll = rows.reduce((s, r) => s + r.total, 0)
+    const totalAll = rows.reduce((sum, row) => sum + row.total, 0)
+
     return { rows, totalAll }
   }, [fees])
 
   const chartData = useMemo(
     () => totals.rows.map((r) => ({ name: r.spelare, value: r.total })),
     [totals.rows]
+  )
+
+  const totalHistoryChartData = useMemo(
+    () =>
+      totalHistory.map((r) => ({
+        datum: formatDateSv(r.datum) ?? r.datum,
+        tot: Number(r.tot ?? 0),
+      })),
+    [totalHistory]
   )
 
   async function handleSubmit() {
@@ -248,9 +271,10 @@ export default function BoterPage() {
     }
 
     setSubmitting(true)
+
     try {
       const payload = activePlayers.map((p) => ({
-        spelare: p,
+        spelare: p, // använder smeknamn/spelarnamn
         belopp: Number(formFees[p] ?? 0),
         ar: regYear,
       }))
@@ -265,15 +289,10 @@ export default function BoterPage() {
         return next
       })
 
-      // Om du råkade registrera på samma år som du visar: refresh listan direkt
-      if (selectedYear === regYear) {
-        setLoadingFees(true)
-        const { data } = await supabase
-          .from(FEES_TABLE)
-          .select("spelare, belopp:bötesbelopp, ar")
-          .eq("ar", selectedYear)
-        setFees((data ?? []) as FeeRow[])
-        setLoadingFees(false)
+      await loadMeta()
+
+      if (selectedYear) {
+        await loadFeesForYear(selectedYear)
       }
     } catch (e) {
       toast.error((e as Error).message)
@@ -282,9 +301,7 @@ export default function BoterPage() {
     }
   }
 
-  const latestLabel = latestTotal?.datum
-    ? new Date(latestTotal.datum).toLocaleDateString("sv-SE")
-    : null
+  const latestLabel = formatDateSv(latestTotal?.datum)
 
   return (
     <div className="flex flex-col gap-6">
@@ -320,7 +337,6 @@ export default function BoterPage() {
         </div>
       ) : (
         <>
-          {/* Rules */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-lg">
@@ -338,7 +354,6 @@ export default function BoterPage() {
             </CardContent>
           </Card>
 
-          {/* View year + Totals */}
           <Card>
             <CardHeader className="pb-3">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -363,6 +378,7 @@ export default function BoterPage() {
                 </div>
               </div>
             </CardHeader>
+
             <CardContent>
               {loadingFees ? (
                 <div className="h-40 animate-pulse rounded-lg bg-muted" />
@@ -390,13 +406,8 @@ export default function BoterPage() {
                       >
                         <CartesianGrid strokeDasharray="3 3" horizontal={false} />
                         <XAxis type="number" tick={{ fontSize: 12 }} />
-                        <YAxis
-                          type="category"
-                          dataKey="name"
-                          width={80}
-                          tick={{ fontSize: 12 }}
-                        />
-                        <Tooltip />
+                        <YAxis type="category" dataKey="name" width={80} tick={{ fontSize: 12 }} />
+                        <Tooltip formatter={(value) => [`${value} kr`, "Böter"]} />
                         <Bar dataKey="value" radius={[0, 6, 6, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
@@ -406,7 +417,41 @@ export default function BoterPage() {
             </CardContent>
           </Card>
 
-          {/* Form */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Total böteskassa över tid</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {totalHistoryChartData.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Ingen historik finns ännu.</p>
+              ) : (
+                <div className="h-72">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart
+                      data={totalHistoryChartData}
+                      margin={{ top: 10, right: 20, left: 10, bottom: 0 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="datum" tick={{ fontSize: 12 }} />
+                      <YAxis tick={{ fontSize: 12 }} />
+                      <Tooltip
+                        formatter={(value) => [`${value} kr`, "Total böteskassa"]}
+                        labelFormatter={(label) => `Datum: ${label}`}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="tot"
+                        strokeWidth={3}
+                        dot={{ r: 4 }}
+                        activeDot={{ r: 6 }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle className="text-lg">Uppdatera böter</CardTitle>
@@ -416,11 +461,13 @@ export default function BoterPage() {
                 Fyll i böter efter deltävlingen. Lämna 0 om ingen böter. Endast aktiva spelare visas.
               </p>
 
-              {/* Registreringsår */}
               <div className="flex flex-col gap-2">
                 <Label>Registrera böter på år</Label>
                 <div className="w-full sm:w-56">
-                  <Select value={regYear ? String(regYear) : ""} onValueChange={(v) => setRegYear(Number(v))}>
+                  <Select
+                    value={regYear ? String(regYear) : ""}
+                    onValueChange={(v) => setRegYear(Number(v))}
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder="Välj år" />
                     </SelectTrigger>
@@ -446,7 +493,12 @@ export default function BoterPage() {
                       step={1}
                       value={formFees[p] ?? 0}
                       onFocus={(e) => e.currentTarget.select()}
-                      onChange={(e) => setFormFees((prev) => ({ ...prev, [p]: Number(e.target.value) }))}
+                      onChange={(e) =>
+                        setFormFees((prev) => ({
+                          ...prev,
+                          [p]: Number(e.target.value),
+                        }))
+                      }
                     />
                   </div>
                 ))}
