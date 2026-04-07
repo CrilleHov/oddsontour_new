@@ -42,7 +42,7 @@ export async function addLeaderboardUpdate(params: {
   tavling: string // YYYY-MM-DD
   antalSpelare: number
   major: "Ja" | "Nej"
-  placeringar: Array<{ spelare: string; placering: number }>
+  placeringar: Array<{ spelare: string; placering: number; motPar: number }>
   password: string
 }) {
   assertAdminPassword(params.password)
@@ -55,13 +55,16 @@ export async function addLeaderboardUpdate(params: {
 
   const rows = params.placeringar.map((p) => {
     const placering = Number(p.placering)
+    const motPar = Number(p.motPar ?? 0)
     const poang = getPoints(placering, antal, params.major)
+
     return {
       "tävling": params.tavling,
       spelare: p.spelare,
       "poäng": poang,
       placering: placering,
       antal_spelare: antal,
+      mot_par: motPar,
     }
   })
 
