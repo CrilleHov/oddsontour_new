@@ -572,8 +572,10 @@ export default function LeaderboardPage() {
                     <XAxis dataKey="datum" tick={{ fontSize: 12 }} />
                     <YAxis tick={{ fontSize: 12 }} />
                     <Tooltip
-                      formatter={(value, name) => [formatSigned(Number(value)), String(name)]}
-                    />
+                        labelFormatter={(label) => `Datum: ${label}`}
+                        formatter={(value, name) => [formatSigned(Number(value)), String(name)]}
+                        itemSorter="value"
+                      />
                     <Legend />
                     {playersInChart.map((p, i) => (
                       <Line
