@@ -61,6 +61,12 @@ function yearFromDate(dateStr: string) {
   return Number(dateStr.slice(0, 4))
 }
 
+function formatDateSv(dateStr: string) {
+  const [year, month, day] = dateStr.slice(0, 10).split("-")
+  if (!year || !month || !day) return dateStr
+  return `${year}-${month}-${day}`
+}
+
 const BASE_COLORS = [
   "var(--color-chart-1)",
   "var(--color-chart-2)",
@@ -91,6 +97,15 @@ function formatSigned(value: number | null | undefined) {
   return `${n}`
 }
 
+function parseMotPar(value: string) {
+  const trimmed = value.trim()
+
+  if (trimmed === "" || trimmed === "-" || trimmed === "+") return 0
+
+  const parsed = Number(trimmed)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
 export default function LeaderboardPage() {
   const supabase = useMemo(() => createClient(), [])
 
@@ -109,8 +124,10 @@ export default function LeaderboardPage() {
   const [tavling, setTavling] = useState<string>("")
   const [antalSpelare, setAntalSpelare] = useState<string>("")
   const [major, setMajor] = useState<"Ja" | "Nej" | "">("")
+
   const [placeringar, setPlaceringar] = useState<Record<string, number>>({})
-  const [motParValues, setMotParValues] = useState<Record<string, number>>({})
+  const [motParValues, setMotParValues] = useState<Record<string, string>>({})
+
   const [password, setPassword] = useState("")
   const [submitting, setSubmitting] = useState(false)
 
@@ -161,17 +178,17 @@ export default function LeaderboardPage() {
     const names = p.map((x) => x.spelarnamn)
 
     setPlaceringar((prev) => {
-      const next = { ...prev }
+      const next: Record<string, number> = {}
       for (const n of names) {
-        if (next[n] === undefined) next[n] = 0
+        next[n] = prev[n] ?? 0
       }
       return next
     })
 
     setMotParValues((prev) => {
-      const next = { ...prev }
+      const next: Record<string, string> = {}
       for (const n of names) {
-        if (next[n] === undefined) next[n] = 0
+        next[n] = prev[n] ?? "0"
       }
       return next
     })
@@ -237,9 +254,14 @@ export default function LeaderboardPage() {
 
   useEffect(() => {
     let cancelled = false
+
     loadMeta()
-      .catch((e) => !cancelled && setError(String(e)))
-      .finally(() => !cancelled && setLoadingMeta(false))
+      .catch((e) => {
+        if (!cancelled) setError(String(e))
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingMeta(false)
+      })
 
     return () => {
       cancelled = true
@@ -253,7 +275,10 @@ export default function LeaderboardPage() {
     }
 
     let cancelled = false
-    loadLeaderboard(selectedYear).catch((e) => !cancelled && setError(String(e)))
+
+    loadLeaderboard(selectedYear).catch((e) => {
+      if (!cancelled) setError(String(e))
+    })
 
     return () => {
       cancelled = true
@@ -264,7 +289,10 @@ export default function LeaderboardPage() {
     if (!updateYear) return
 
     let cancelled = false
-    loadCompetitionsForYear(updateYear).catch((e) => !cancelled && setError(String(e)))
+
+    loadCompetitionsForYear(updateYear).catch((e) => {
+      if (!cancelled) setError(String(e))
+    })
 
     return () => {
       cancelled = true
@@ -316,8 +344,8 @@ export default function LeaderboardPage() {
         cumulativePoints.set(r.spelare, (cumulativePoints.get(r.spelare) ?? 0) + Number(r.poang ?? 0))
       }
 
-      const point: Record<string, any> = {
-        datum: new Date(d).toLocaleDateString("sv-SE"),
+      const point: Record<string, number | string> = {
+        datum: formatDateSv(d),
         _rawDate: d,
       }
 
@@ -335,8 +363,8 @@ export default function LeaderboardPage() {
         cumulativePar.set(r.spelare, (cumulativePar.get(r.spelare) ?? 0) + Number(r.motPar ?? 0))
       }
 
-      const point: Record<string, any> = {
-        datum: new Date(d).toLocaleDateString("sv-SE"),
+      const point: Record<string, number | string> = {
+        datum: formatDateSv(d),
         _rawDate: d,
       }
 
@@ -360,6 +388,7 @@ export default function LeaderboardPage() {
     const spelade = Object.values(placeringar).filter((p) => Number(p) > 0).length
 
     setSubmitting(true)
+
     try {
       const res = await addLeaderboardUpdate({
         tavling,
@@ -368,7 +397,7 @@ export default function LeaderboardPage() {
         placeringar: players.map((p) => ({
           spelare: p.spelarnamn,
           placering: Number(placeringar[p.spelarnamn] ?? 0),
-          motPar: Number(motParValues[p.spelarnamn] ?? 0),
+          motPar: parseMotPar(motParValues[p.spelarnamn] ?? "0"),
         })),
         password,
       })
@@ -380,6 +409,7 @@ export default function LeaderboardPage() {
       }
 
       setPassword("")
+
       setPlaceringar((prev) => {
         const next = { ...prev }
         for (const p of players) next[p.spelarnamn] = 0
@@ -388,7 +418,7 @@ export default function LeaderboardPage() {
 
       setMotParValues((prev) => {
         const next = { ...prev }
-        for (const p of players) next[p.spelarnamn] = 0
+        for (const p of players) next[p.spelarnamn] = "0"
         return next
       })
 
@@ -470,6 +500,7 @@ export default function LeaderboardPage() {
                         key={p}
                         type="monotone"
                         dataKey={p}
+                        name={p}
                         stroke={colorForPlayer(p, i)}
                         strokeWidth={2}
                         dot={false}
@@ -585,7 +616,8 @@ export default function LeaderboardPage() {
 
         <CardContent className="flex flex-col gap-4">
           <p className="text-sm text-muted-foreground">
-            Fyll i tävling, placering och mot par för respektive spelare. Om någon inte spelade, fyll i <strong>0</strong> i placering.
+            Fyll i tävling, placering och mot par för respektive spelare. Om någon inte spelade, fyll i{" "}
+            <strong>0</strong> i placering.
           </p>
 
           <div className="grid gap-4 sm:grid-cols-2">
@@ -617,7 +649,7 @@ export default function LeaderboardPage() {
                 <SelectContent>
                   {competitions.map((c) => (
                     <SelectItem key={c.datum} value={c.datum}>
-                      {new Date(c.datum).toLocaleDateString("sv-SE")} {c.bana ? `– ${c.bana}` : ""}
+                      {formatDateSv(c.datum)} {c.bana ? `– ${c.bana}` : ""}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -642,7 +674,7 @@ export default function LeaderboardPage() {
 
             <div className="flex flex-col gap-2">
               <Label>Var tävlingen en major?</Label>
-              <Select value={major} onValueChange={(v) => setMajor(v as any)}>
+              <Select value={major} onValueChange={(v) => setMajor(v as "Ja" | "Nej")}>
                 <SelectTrigger>
                   <SelectValue placeholder="Ja/Nej" />
                 </SelectTrigger>
@@ -684,12 +716,12 @@ export default function LeaderboardPage() {
                       id={`mp-${p.spelarnamn}`}
                       type="number"
                       step={1}
-                      value={motParValues[p.spelarnamn] ?? 0}
+                      value={motParValues[p.spelarnamn] ?? "0"}
                       onFocus={(e) => e.currentTarget.select()}
                       onChange={(e) =>
                         setMotParValues((prev) => ({
                           ...prev,
-                          [p.spelarnamn]: Number(e.target.value),
+                          [p.spelarnamn]: e.target.value,
                         }))
                       }
                     />
