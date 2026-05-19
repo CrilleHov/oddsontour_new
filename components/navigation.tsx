@@ -15,6 +15,7 @@ import {
   Menu,
   X,
   ClipboardList,
+  MapPin,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -24,6 +25,7 @@ const links = [
   { href: "/spelschema", label: "Spelschema", icon: CalendarDays },
   { href: "/boter", label: "Böteskassa", icon: Banknote },
   { href: "/spelare", label: "Spelare", icon: Users },
+  { href: "/banor", label: "Banstatistik", icon: MapPin },
   { href: "/bilder", label: "Bilder", icon: Images },
   { href: "/countdown", label: "Countdown", icon: Timer },
   { href: "/historia", label: "Historia & Info", icon: BookOpen },
