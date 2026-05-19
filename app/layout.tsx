@@ -7,9 +7,13 @@ import "./globals.css"
 
 const _inter = Inter({ subsets: ["latin"] })
 
-export const metadata: Metadata = {
+export const metadata = {
   title: "Odds on Tour",
-  description: "Leaderboard, spelschema och info för Odds on Tour",
+  description: "Leaderboard, spelschema, böter och historik för Odds on Tour.",
+  icons: {
+    icon: "/icon.png",
+    apple: "/apple-icon.png",
+  },
 }
 
 export default function RootLayout({
