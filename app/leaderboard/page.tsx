@@ -1346,20 +1346,62 @@ export default function LeaderboardPage() {
                       />
                     </div>
 
-                    <div className="space-y-2">
-                      <Label>Mot par</Label>
-                      <Input
-                        inputMode="numeric"
-                        value={motParValues[p.spelarnamn] ?? "0"}
-                        onFocus={(e) => e.currentTarget.select()}
-                        onChange={(e) =>
-                          setMotParValues((prev) => ({
-                            ...prev,
-                            [p.spelarnamn]: e.target.value,
-                          }))
-                        }
-                      />
-                    </div>
+                   <div className="space-y-2">
+  <Label>Mot par</Label>
+
+  <div className="grid grid-cols-[auto_1fr_auto] gap-2">
+    <Button
+      type="button"
+      variant="secondary"
+      onClick={() =>
+        setMotParValues((prev) => {
+          const current = parseMotPar(prev[p.spelarnamn] ?? "0")
+
+          return {
+            ...prev,
+            [p.spelarnamn]: String(current - 1),
+          }
+        })
+      }
+    >
+      −
+    </Button>
+
+    <Input
+      type="text"
+      inputMode="decimal"
+      value={motParValues[p.spelarnamn] ?? "0"}
+      onFocus={(e) => e.currentTarget.select()}
+      onChange={(e) => {
+        const value = e.target.value
+
+        if (/^[+-]?\d*$/.test(value)) {
+          setMotParValues((prev) => ({
+            ...prev,
+            [p.spelarnamn]: value,
+          }))
+        }
+      }}
+    />
+
+    <Button
+      type="button"
+      variant="secondary"
+      onClick={() =>
+        setMotParValues((prev) => {
+          const current = parseMotPar(prev[p.spelarnamn] ?? "0")
+
+          return {
+            ...prev,
+            [p.spelarnamn]: String(current + 1),
+          }
+        })
+      }
+    >
+      +
+    </Button>
+  </div>
+</div>
                   </div>
                 </div>
               ))}
