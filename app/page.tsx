@@ -165,7 +165,7 @@ export default function HomePage() {
           .returns<CompetitionRow[]>(),
 
         supabase
-          .from("böter")
+          .from("fees")
           .select("spelare, botesbelopp:bötesbelopp, ar")
           .returns<FineRow[]>(),
 
