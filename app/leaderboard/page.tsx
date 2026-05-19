@@ -24,8 +24,10 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  Legend,
+  LabelList,
 } from "recharts"
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 type LeaderboardRow = {
   tavling: string // YYYY-MM-DD
@@ -42,6 +44,8 @@ type SummaryRow = {
   antalComps: number
   antalVinster: number
   antalSistaplatser: number
+  snittPoang: number | null
+  snittMotPar: number | null
 }
 
 type Competition = {
@@ -57,6 +61,8 @@ const COMP_TABLE = "competitions"
 const LB_TABLE = "leaderboard"
 const PLAYERS_TABLE = "spelare"
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
 function yearFromDate(dateStr: string) {
   return Number(dateStr.slice(0, 4))
 }
@@ -65,6 +71,13 @@ function formatDateSv(dateStr: string) {
   const [year, month, day] = dateStr.slice(0, 10).split("-")
   if (!year || !month || !day) return dateStr
   return `${year}-${month}-${day}`
+}
+
+function formatSigned(value: number | null | undefined, decimals = 0): string {
+  if (value === null || value === undefined) return "–"
+  const n = parseFloat(Number(value).toFixed(decimals))
+  if (n > 0) return `+${n}`
+  return `${n}`
 }
 
 const BASE_COLORS = [
@@ -86,32 +99,49 @@ function hashString(str: string) {
 function colorForPlayer(name: string, index: number) {
   if (index < BASE_COLORS.length) return BASE_COLORS[index]
   const hue = hashString(name) % 360
-  const light = 0.72
-  const chroma = 0.17
-  return `oklch(${light} ${chroma} ${hue})`
-}
-
-function formatSigned(value: number | null | undefined) {
-  const n = Number(value ?? 0)
-  if (n > 0) return `+${n}`
-  return `${n}`
+  return `oklch(0.72 0.17 ${hue})`
 }
 
 function parseMotPar(value: string) {
   const trimmed = value.trim()
-
   if (trimmed === "" || trimmed === "-" || trimmed === "+") return 0
-
   const parsed = Number(trimmed)
   return Number.isFinite(parsed) ? parsed : 0
 }
+
+// ─── Custom chart label (renders player name at the last data point) ──────────
+
+function LineEndLabel(props: {
+  x?: number
+  y?: number
+  value?: string
+  fill?: string
+  index?: number
+  dataLength: number
+}) {
+  const { x, y, value, fill, index, dataLength } = props
+  if (index !== dataLength - 1 || !value || x === undefined || y === undefined) return null
+  return (
+    <text
+      x={x + 6}
+      y={y + 4}
+      fill={fill}
+      fontSize={11}
+      fontWeight={600}
+      style={{ pointerEvents: "none" }}
+    >
+      {value}
+    </text>
+  )
+}
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function LeaderboardPage() {
   const supabase = useMemo(() => createClient(), [])
 
   const [years, setYears] = useState<number[]>([])
   const [selectedYear, setSelectedYear] = useState<number | null>(null)
-
   const [rows, setRows] = useState<LeaderboardRow[]>([])
   const [loadingMeta, setLoadingMeta] = useState(true)
   const [loadingLB, setLoadingLB] = useState(true)
@@ -124,12 +154,12 @@ export default function LeaderboardPage() {
   const [tavling, setTavling] = useState<string>("")
   const [antalSpelare, setAntalSpelare] = useState<string>("")
   const [major, setMajor] = useState<"Ja" | "Nej" | "">("")
-
   const [placeringar, setPlaceringar] = useState<Record<string, number>>({})
   const [motParValues, setMotParValues] = useState<Record<string, string>>({})
-
   const [password, setPassword] = useState("")
   const [submitting, setSubmitting] = useState(false)
+
+  // ── Data fetching ──────────────────────────────────────────────────────────
 
   async function loadMeta() {
     setLoadingMeta(true)
@@ -138,11 +168,7 @@ export default function LeaderboardPage() {
     const [{ data: compDates, error: compErr }, { data: playerData, error: playerErr }] =
       await Promise.all([
         supabase.from(COMP_TABLE).select("datum"),
-        supabase
-          .from(PLAYERS_TABLE)
-          .select("spelarnamn")
-          .eq("aktiv", 1)
-          .order("spelarnamn"),
+        supabase.from(PLAYERS_TABLE).select("spelarnamn").eq("aktiv", 1).order("spelarnamn"),
       ])
 
     if (compErr) {
@@ -155,7 +181,6 @@ export default function LeaderboardPage() {
       setLoadingLB(false)
       return
     }
-
     if (playerErr) {
       setError(playerErr.message)
       setPlayers([])
@@ -174,22 +199,16 @@ export default function LeaderboardPage() {
 
     const p = (playerData ?? []) as Player[]
     setPlayers(p)
-
     const names = p.map((x) => x.spelarnamn)
 
     setPlaceringar((prev) => {
       const next: Record<string, number> = {}
-      for (const n of names) {
-        next[n] = prev[n] ?? 0
-      }
+      for (const n of names) next[n] = prev[n] ?? 0
       return next
     })
-
     setMotParValues((prev) => {
       const next: Record<string, string> = {}
-      for (const n of names) {
-        next[n] = prev[n] ?? "0"
-      }
+      for (const n of names) next[n] = prev[n] ?? "0"
       return next
     })
 
@@ -199,9 +218,6 @@ export default function LeaderboardPage() {
   async function loadLeaderboard(year: number) {
     setLoadingLB(true)
     setError(null)
-
-    const from = `${year}-01-01`
-    const to = `${year}-12-31`
 
     const { data, error } = await supabase
       .from(LB_TABLE)
@@ -215,8 +231,8 @@ export default function LeaderboardPage() {
         motPar:mot_par
       `
       )
-      .gte("tävling", from)
-      .lte("tävling", to)
+      .gte("tävling", `${year}-01-01`)
+      .lte("tävling", `${year}-12-31`)
       .order("tävling", { ascending: true })
       .returns<LeaderboardRow[]>()
 
@@ -232,14 +248,11 @@ export default function LeaderboardPage() {
   }
 
   async function loadCompetitionsForYear(year: number) {
-    const from = `${year}-01-01`
-    const to = `${year}-12-31`
-
     const { data, error } = await supabase
       .from(COMP_TABLE)
       .select("datum, bana")
-      .gte("datum", from)
-      .lte("datum", to)
+      .gte("datum", `${year}-01-01`)
+      .lte("datum", `${year}-12-31`)
       .order("datum", { ascending: true })
 
     if (error) {
@@ -254,64 +267,44 @@ export default function LeaderboardPage() {
 
   useEffect(() => {
     let cancelled = false
-
     loadMeta()
-      .catch((e) => {
-        if (!cancelled) setError(String(e))
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingMeta(false)
-      })
-
-    return () => {
-      cancelled = true
-    }
+      .catch((e) => { if (!cancelled) setError(String(e)) })
+      .finally(() => { if (!cancelled) setLoadingMeta(false) })
+    return () => { cancelled = true }
   }, [])
 
   useEffect(() => {
-    if (!selectedYear) {
-      setLoadingLB(false)
-      return
-    }
-
+    if (!selectedYear) { setLoadingLB(false); return }
     let cancelled = false
-
-    loadLeaderboard(selectedYear).catch((e) => {
-      if (!cancelled) setError(String(e))
-    })
-
-    return () => {
-      cancelled = true
-    }
+    loadLeaderboard(selectedYear).catch((e) => { if (!cancelled) setError(String(e)) })
+    return () => { cancelled = true }
   }, [selectedYear])
 
   useEffect(() => {
     if (!updateYear) return
-
     let cancelled = false
-
-    loadCompetitionsForYear(updateYear).catch((e) => {
-      if (!cancelled) setError(String(e))
-    })
-
-    return () => {
-      cancelled = true
-    }
+    loadCompetitionsForYear(updateYear).catch((e) => { if (!cancelled) setError(String(e)) })
+    return () => { cancelled = true }
   }, [updateYear])
 
+  // ── Derived data ───────────────────────────────────────────────────────────
+
   const { summary, chartData, parChartData, playersInChart } = useMemo(() => {
-    const byPlayer = new Map<string, SummaryRow>()
+    const byPlayer = new Map<string, SummaryRow & { motParSum: number; motParCount: number }>()
 
     for (const r of rows) {
       const name = r.spelare
-      const cur =
-        byPlayer.get(name) ?? {
-          spelare: name,
-          totalPoang: 0,
-          antalComps: 0,
-          antalVinster: 0,
-          antalSistaplatser: 0,
-        }
+      const cur = byPlayer.get(name) ?? {
+        spelare: name,
+        totalPoang: 0,
+        antalComps: 0,
+        antalVinster: 0,
+        antalSistaplatser: 0,
+        snittPoang: null,
+        snittMotPar: null,
+        motParSum: 0,
+        motParCount: 0,
+      }
 
       const points = Number(r.poang ?? 0)
       cur.totalPoang += points
@@ -319,10 +312,22 @@ export default function LeaderboardPage() {
       if (Number(r.placering) === 1) cur.antalVinster += 1
       if (Number(r.placering) === Number(r.antal_spelare)) cur.antalSistaplatser += 1
 
+      if (r.motPar !== null && r.motPar !== undefined) {
+        cur.motParSum += Number(r.motPar)
+        cur.motParCount += 1
+      }
+
       byPlayer.set(name, cur)
     }
 
-    const summary = Array.from(byPlayer.values()).sort((a, b) => b.totalPoang - a.totalPoang)
+    // Calculate averages
+    const summary: SummaryRow[] = Array.from(byPlayer.values())
+      .map(({ motParSum, motParCount, ...rest }) => ({
+        ...rest,
+        snittPoang: rest.antalComps > 0 ? rest.totalPoang / rest.antalComps : null,
+        snittMotPar: motParCount > 0 ? motParSum / motParCount : null,
+      }))
+      .sort((a, b) => b.totalPoang - a.totalPoang)
 
     const dates = Array.from(new Set(rows.map((r) => r.tavling))).sort()
     const playersInChart = Array.from(new Set(rows.map((r) => r.spelare))).sort()
@@ -339,44 +344,28 @@ export default function LeaderboardPage() {
 
     const chartData = dates.map((d) => {
       const bucket = rowsByDate.get(d) ?? []
-
       for (const r of bucket) {
         cumulativePoints.set(r.spelare, (cumulativePoints.get(r.spelare) ?? 0) + Number(r.poang ?? 0))
       }
-
-      const point: Record<string, number | string> = {
-        datum: formatDateSv(d),
-        _rawDate: d,
-      }
-
-      for (const p of playersInChart) {
-        point[p] = cumulativePoints.get(p) ?? 0
-      }
-
+      const point: Record<string, number | string> = { datum: formatDateSv(d), _rawDate: d }
+      for (const p of playersInChart) point[p] = cumulativePoints.get(p) ?? 0
       return point
     })
 
     const parChartData = dates.map((d) => {
       const bucket = rowsByDate.get(d) ?? []
-
       for (const r of bucket) {
         cumulativePar.set(r.spelare, (cumulativePar.get(r.spelare) ?? 0) + Number(r.motPar ?? 0))
       }
-
-      const point: Record<string, number | string> = {
-        datum: formatDateSv(d),
-        _rawDate: d,
-      }
-
-      for (const p of playersInChart) {
-        point[p] = cumulativePar.get(p) ?? 0
-      }
-
+      const point: Record<string, number | string> = { datum: formatDateSv(d), _rawDate: d }
+      for (const p of playersInChart) point[p] = cumulativePar.get(p) ?? 0
       return point
     })
 
     return { summary, chartData, parChartData, playersInChart }
   }, [rows])
+
+  // ── Submit ─────────────────────────────────────────────────────────────────
 
   async function handleLeaderboardSubmit() {
     if (!tavling || !antalSpelare || !major) {
@@ -388,7 +377,6 @@ export default function LeaderboardPage() {
     const spelade = Object.values(placeringar).filter((p) => Number(p) > 0).length
 
     setSubmitting(true)
-
     try {
       const res = await addLeaderboardUpdate({
         tavling,
@@ -403,19 +391,16 @@ export default function LeaderboardPage() {
       })
 
       toast.success(`Leaderboard uppdaterad! (insatt ${res.inserted} rader)`)
-
       if (spelade !== antal) {
-        toast.warning(`Du angav ${antal} spelare men du har fyllt i ${spelade} placeringar > 0.`)
+        toast.warning(`Du angav ${antal} spelare men fyllde i ${spelade} placeringar > 0.`)
       }
 
       setPassword("")
-
       setPlaceringar((prev) => {
         const next = { ...prev }
         for (const p of players) next[p.spelarnamn] = 0
         return next
       })
-
       setMotParValues((prev) => {
         const next = { ...prev }
         for (const p of players) next[p.spelarnamn] = "0"
@@ -432,11 +417,13 @@ export default function LeaderboardPage() {
     }
   }
 
+  // ── Render ─────────────────────────────────────────────────────────────────
+
   return (
     <div className="flex flex-col gap-6">
+      {/* Title + year selector */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-2xl font-bold text-foreground">Leaderboard</h1>
-
         <div className="w-full sm:w-56">
           <Select
             value={selectedYear ? String(selectedYear) : ""}
@@ -448,15 +435,14 @@ export default function LeaderboardPage() {
             </SelectTrigger>
             <SelectContent>
               {years.map((y) => (
-                <SelectItem key={y} value={String(y)}>
-                  {y}
-                </SelectItem>
+                <SelectItem key={y} value={String(y)}>{y}</SelectItem>
               ))}
             </SelectContent>
           </Select>
         </div>
       </div>
 
+      {/* Error */}
       {error && (
         <Card>
           <CardContent className="py-5">
@@ -468,6 +454,7 @@ export default function LeaderboardPage() {
         </Card>
       )}
 
+      {/* Loading / empty / content */}
       {loadingMeta || loadingLB ? (
         <div className="flex flex-col gap-4">
           <div className="h-8 w-48 animate-pulse rounded bg-muted" />
@@ -477,11 +464,14 @@ export default function LeaderboardPage() {
         <Card>
           <CardContent className="flex flex-col items-center gap-4 py-12">
             <Trophy className="h-12 w-12 text-muted-foreground" />
-            <p className="text-muted-foreground">Inga resultat hittades för {selectedYear}.</p>
+            <p className="text-muted-foreground">
+              Inga resultat hittades för {selectedYear}.
+            </p>
           </CardContent>
         </Card>
       ) : (
         <>
+          {/* ── Poängutveckling ── */}
           <Card>
             <CardHeader>
               <CardTitle className="text-lg">Poängutveckling</CardTitle>
@@ -489,7 +479,10 @@ export default function LeaderboardPage() {
             <CardContent>
               <div className="h-80">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={chartData} margin={{ top: 5, right: 20, left: 0, bottom: 0 }}>
+                  <LineChart
+                    data={chartData}
+                    margin={{ top: 5, right: 90, left: 0, bottom: 0 }}
+                  >
                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
                     <XAxis dataKey="datum" tick={{ fontSize: 12 }} />
                     <YAxis tick={{ fontSize: 12 }} />
@@ -498,7 +491,6 @@ export default function LeaderboardPage() {
                       formatter={(value, name) => [formatSigned(Number(value)), String(name)]}
                       itemSorter="value"
                     />
-                    <Legend />
                     {playersInChart.map((p, i) => (
                       <Line
                         key={p}
@@ -508,7 +500,21 @@ export default function LeaderboardPage() {
                         stroke={colorForPlayer(p, i)}
                         strokeWidth={2}
                         dot={false}
-                      />
+                        isAnimationActive={false}
+                      >
+                        <LabelList
+                          dataKey={p}
+                          position="right"
+                          content={(props: any) => (
+                            <LineEndLabel
+                              {...props}
+                              fill={colorForPlayer(p, i)}
+                              value={p}
+                              dataLength={chartData.length}
+                            />
+                          )}
+                        />
+                      </Line>
                     ))}
                   </LineChart>
                 </ResponsiveContainer>
@@ -516,6 +522,7 @@ export default function LeaderboardPage() {
             </CardContent>
           </Card>
 
+          {/* ── Ställning ── */}
           <Card>
             <CardHeader>
               <CardTitle className="text-lg">Ställning (inför finalen)</CardTitle>
@@ -527,15 +534,21 @@ export default function LeaderboardPage() {
                     <tr className="border-b border-border text-left">
                       <th className="pb-3 pr-4 font-semibold text-muted-foreground">#</th>
                       <th className="pb-3 pr-4 font-semibold text-muted-foreground">Spelare</th>
-                      <th className="pb-3 pr-4 font-semibold text-muted-foreground">Totala poäng</th>
+                      <th className="pb-3 pr-4 font-semibold text-muted-foreground">Totalt</th>
+                      <th className="pb-3 pr-4 font-semibold text-muted-foreground">Snitt p/tävl</th>
+                      <th className="pb-3 pr-4 font-semibold text-muted-foreground">Snitt mot par</th>
                       <th className="pb-3 pr-4 font-semibold text-muted-foreground">Tävlingar</th>
                       <th className="pb-3 pr-4 font-semibold text-muted-foreground">Vinster</th>
-                      <th className="pb-3 font-semibold text-muted-foreground">Sistaplatser</th>
+                      <th className="pb-3 font-semibold text-muted-foreground">Sista 💀</th>
                     </tr>
                   </thead>
                   <tbody>
                     {summary.map((s, idx) => (
-                      <tr key={s.spelare} className="border-b border-border/50 last:border-0">
+                      <tr
+                        key={s.spelare}
+                        className="border-b border-border/50 last:border-0"
+                      >
+                        {/* Rank */}
                         <td className="py-3 pr-4">
                           <span
                             className={
@@ -551,11 +564,52 @@ export default function LeaderboardPage() {
                             {idx + 1}
                           </span>
                         </td>
-                        <td className="py-3 pr-4 font-medium text-foreground">{s.spelare}</td>
-                        <td className="py-3 pr-4 font-bold text-foreground">{s.totalPoang}</td>
-                        <td className="py-3 pr-4 text-muted-foreground">{s.antalComps}</td>
-                        <td className="py-3 pr-4 text-muted-foreground">{s.antalVinster}</td>
-                        <td className="py-3 text-muted-foreground">{s.antalSistaplatser}</td>
+
+                        {/* Name */}
+                        <td className="py-3 pr-4 font-medium text-foreground">
+                          {s.spelare}
+                        </td>
+
+                        {/* Total points */}
+                        <td className="py-3 pr-4 font-bold text-foreground">
+                          {s.totalPoang}
+                        </td>
+
+                        {/* Snitt poäng/tävling */}
+                        <td className="py-3 pr-4 text-muted-foreground">
+                          {s.snittPoang !== null
+                            ? s.snittPoang.toFixed(1)
+                            : "–"}
+                        </td>
+
+                        {/* Snitt mot par */}
+                        <td
+                          className={
+                            "py-3 pr-4 font-medium " +
+                            (s.snittMotPar === null
+                              ? "text-muted-foreground"
+                              : s.snittMotPar <= 0
+                                ? "text-primary"
+                                : "text-destructive")
+                          }
+                        >
+                          {formatSigned(s.snittMotPar, 1)}
+                        </td>
+
+                        {/* Tävlingar */}
+                        <td className="py-3 pr-4 text-muted-foreground">
+                          {s.antalComps}
+                        </td>
+
+                        {/* Vinster */}
+                        <td className="py-3 pr-4 text-muted-foreground">
+                          {s.antalVinster}
+                        </td>
+
+                        {/* Sistaplatser */}
+                        <td className="py-3 text-muted-foreground">
+                          {s.antalSistaplatser}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -564,6 +618,7 @@ export default function LeaderboardPage() {
             </CardContent>
           </Card>
 
+          {/* ── Kumulativ mot par ── */}
           <Card>
             <CardHeader>
               <CardTitle className="text-lg">Kumulativ utveckling mot par</CardTitle>
@@ -571,16 +626,18 @@ export default function LeaderboardPage() {
             <CardContent>
               <div className="h-80">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={parChartData} margin={{ top: 5, right: 20, left: 0, bottom: 0 }}>
+                  <LineChart
+                    data={parChartData}
+                    margin={{ top: 5, right: 90, left: 0, bottom: 0 }}
+                  >
                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
                     <XAxis dataKey="datum" tick={{ fontSize: 12 }} />
                     <YAxis tick={{ fontSize: 12 }} />
                     <Tooltip
-                        labelFormatter={(label) => `Datum: ${label}`}
-                        formatter={(value, name) => [formatSigned(Number(value)), String(name)]}
-                        itemSorter="value"
-                      />
-                    <Legend />
+                      labelFormatter={(label) => `Datum: ${label}`}
+                      formatter={(value, name) => [formatSigned(Number(value)), String(name)]}
+                      itemSorter="value"
+                    />
                     {playersInChart.map((p, i) => (
                       <Line
                         key={p}
@@ -590,7 +647,21 @@ export default function LeaderboardPage() {
                         stroke={colorForPlayer(p, i)}
                         strokeWidth={2}
                         dot={false}
-                      />
+                        isAnimationActive={false}
+                      >
+                        <LabelList
+                          dataKey={p}
+                          position="right"
+                          content={(props: any) => (
+                            <LineEndLabel
+                              {...props}
+                              fill={colorForPlayer(p, i)}
+                              value={p}
+                              dataLength={parChartData.length}
+                            />
+                          )}
+                        />
+                      </Line>
                     ))}
                   </LineChart>
                 </ResponsiveContainer>
@@ -600,6 +671,7 @@ export default function LeaderboardPage() {
         </>
       )}
 
+      {/* ── Uppdatera leaderboard ── */}
       <Card>
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between gap-3">
@@ -607,7 +679,6 @@ export default function LeaderboardPage() {
               <Settings className="h-5 w-5 text-primary" />
               Uppdatera leaderboard
             </CardTitle>
-
             <Button
               variant="secondary"
               onClick={() => loadMeta()}
@@ -622,11 +693,12 @@ export default function LeaderboardPage() {
 
         <CardContent className="flex flex-col gap-4">
           <p className="text-sm text-muted-foreground">
-            Fyll i tävling, placering och mot par för respektive spelare. Om någon inte spelade, fyll i{" "}
-            <strong>0</strong> i placering.
+            Fyll i tävling, placering och mot par för respektive spelare. Om någon
+            inte spelade, fyll i <strong>0</strong> i placering.
           </p>
 
           <div className="grid gap-4 sm:grid-cols-2">
+            {/* År */}
             <div className="flex flex-col gap-2">
               <Label>År</Label>
               <Select
@@ -638,19 +710,22 @@ export default function LeaderboardPage() {
                 </SelectTrigger>
                 <SelectContent>
                   {years.map((y) => (
-                    <SelectItem key={y} value={String(y)}>
-                      {y}
-                    </SelectItem>
+                    <SelectItem key={y} value={String(y)}>{y}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
 
+            {/* Deltävling */}
             <div className="flex flex-col gap-2">
               <Label>Deltävling</Label>
               <Select value={tavling} onValueChange={setTavling}>
                 <SelectTrigger>
-                  <SelectValue placeholder={competitions.length ? "Välj tävling" : "Inga tävlingar"} />
+                  <SelectValue
+                    placeholder={
+                      competitions.length ? "Välj tävling" : "Inga tävlingar"
+                    }
+                  />
                 </SelectTrigger>
                 <SelectContent>
                   {competitions.map((c) => (
@@ -662,6 +737,7 @@ export default function LeaderboardPage() {
               </Select>
             </div>
 
+            {/* Antal spelare */}
             <div className="flex flex-col gap-2">
               <Label>Hur många spelare var med?</Label>
               <Select value={antalSpelare} onValueChange={setAntalSpelare}>
@@ -670,17 +746,19 @@ export default function LeaderboardPage() {
                 </SelectTrigger>
                 <SelectContent>
                   {[3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((n) => (
-                    <SelectItem key={n} value={String(n)}>
-                      {n}
-                    </SelectItem>
+                    <SelectItem key={n} value={String(n)}>{n}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
 
+            {/* Major */}
             <div className="flex flex-col gap-2">
               <Label>Var tävlingen en major?</Label>
-              <Select value={major} onValueChange={(v) => setMajor(v as "Ja" | "Nej")}>
+              <Select
+                value={major}
+                onValueChange={(v) => setMajor(v as "Ja" | "Nej")}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Ja/Nej" />
                 </SelectTrigger>
@@ -692,11 +770,11 @@ export default function LeaderboardPage() {
             </div>
           </div>
 
+          {/* Per-player inputs */}
           <div className="grid gap-6 sm:grid-cols-2">
             {players.map((p) => (
               <div key={p.spelarnamn} className="rounded-lg border border-border p-4">
                 <div className="mb-3 font-medium text-foreground">{p.spelarnamn}</div>
-
                 <div className="grid gap-3">
                   <div className="flex flex-col gap-2">
                     <Label htmlFor={`pl-${p.spelarnamn}`}>Placering</Label>
@@ -715,7 +793,6 @@ export default function LeaderboardPage() {
                       }
                     />
                   </div>
-
                   <div className="flex flex-col gap-2">
                     <Label htmlFor={`mp-${p.spelarnamn}`}>Mot par</Label>
                     <Input
@@ -737,6 +814,7 @@ export default function LeaderboardPage() {
             ))}
           </div>
 
+          {/* Password */}
           <div className="flex flex-col gap-2">
             <Label htmlFor="adminpass">Lösenord</Label>
             <Input
@@ -747,7 +825,11 @@ export default function LeaderboardPage() {
             />
           </div>
 
-          <Button onClick={handleLeaderboardSubmit} disabled={submitting} className="self-start">
+          <Button
+            onClick={handleLeaderboardSubmit}
+            disabled={submitting}
+            className="self-start"
+          >
             <Trophy className="mr-2 h-4 w-4" />
             {submitting ? "Sparar..." : "Uppdatera leaderboard"}
           </Button>
