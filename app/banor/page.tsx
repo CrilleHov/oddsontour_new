@@ -1,35 +1,51 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import type { ComponentType, ReactNode } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
-  BarChart,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
+  AlertTriangle,
+  BarChart3,
+  CalendarDays,
+  Crown,
+  Flag,
+  Flame,
+  MapPin,
+  Skull,
+  Sparkles,
+  Star,
+  Target,
+  TrendingDown,
+  TrendingUp,
+  Trophy,
+} from "lucide-react"
+import {
   Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  ResponsiveContainer,
+  Tooltip,
   XAxis,
   YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  ScatterChart,
-  Scatter,
-  Cell,
 } from "recharts"
-import {
-  MapPin,
-  TrendingUp,
-  TrendingDown,
-  Trophy,
-  Skull,
-  Target,
-  BarChart3,
-} from "lucide-react"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type CompetitionRow = {
   datum: string
   bana: string | null
+  plats: string | null
+  major: string | null
+  ar: string | null
 }
 
 type LBRow = {
@@ -43,105 +59,71 @@ type LBRow = {
 
 type CourseStats = {
   bana: string
+  plats: string | null
   antalGanger: number
-  snittMotPar: number
-  bastaMotPar: number
-  samstaMotPar: number
-  bastaSpelare: { spelare: string; snittMotPar: number }
-  samstaSpelare: { spelare: string; snittMotPar: number }
-  snittPoang: number
+  antalRonder: number
+  antalMajors: number
+  snittMotPar: number | null
+  bastaMotPar: number | null
+  samstaMotPar: number | null
+  snittPoang: number | null
+  latestDate: string | null
+  latestWinner: string | null
+  bestRound: { spelare: string; motPar: number; datum: string } | null
+  worstRound: { spelare: string; motPar: number; datum: string } | null
+  bastaSpelare: { spelare: string; snittMotPar: number } | null
+  samstaSpelare: { spelare: string; snittMotPar: number } | null
 }
 
 const COMP_TABLE = "competitions"
 const LB_TABLE = "leaderboard"
 
+const COLORS = [
+  "var(--color-chart-1)",
+  "var(--color-chart-2)",
+  "var(--color-chart-3)",
+  "var(--color-chart-4)",
+  "var(--color-chart-5)",
+]
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function yearFromDate(dateStr: string) {
+  return Number(dateStr.slice(0, 4))
+}
 
 function formatSigned(n: number | null | undefined, decimals = 1): string {
   if (n === null || n === undefined) return "–"
-  const val = parseFloat(n.toFixed(decimals))
+
+  const val = parseFloat(Number(n).toFixed(decimals))
   return val > 0 ? `+${val}` : `${val}`
 }
 
-// ─── Course card ──────────────────────────────────────────────────────────────
+function formatDate(dateStr: string | null | undefined) {
+  if (!dateStr) return "–"
 
-function CourseCard({ stats }: { stats: CourseStats }) {
-  const baseColor = stats.snittMotPar <= 0 ? "text-primary" : "text-destructive"
+  const date = new Date(`${dateStr.slice(0, 10)}T00:00:00`)
 
-  return (
-    <Card>
-      <CardContent className="flex flex-col gap-4 py-5">
-        {/* Header */}
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h3 className="text-lg font-semibold text-foreground">{stats.bana}</h3>
-            <p className="mt-0.5 text-sm text-muted-foreground">
-              Spelad {stats.antalGanger} {stats.antalGanger === 1 ? "gång" : "gånger"}
-            </p>
-          </div>
-          <div className="flex flex-col items-end gap-0.5">
-            <span className={`text-2xl font-extrabold tabular-nums ${baseColor}`}>
-              {formatSigned(stats.snittMotPar)}
-            </span>
-            <span className="text-xs text-muted-foreground">snitt</span>
-          </div>
-        </div>
+  if (Number.isNaN(date.getTime())) return dateStr
 
-        {/* Stats grid */}
-        <div className="grid gap-2 sm:grid-cols-3">
-          <div className="rounded-lg bg-secondary/40 p-3">
-            <div className="text-xs text-muted-foreground">Snitt poäng/runda</div>
-            <div className="mt-1 text-lg font-bold text-foreground">
-              {stats.snittPoang.toFixed(1)} p
-            </div>
-          </div>
+  return new Intl.DateTimeFormat("sv-SE", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }).format(date)
+}
 
-          <div className="rounded-lg bg-secondary/40 p-3">
-            <div className="text-xs text-muted-foreground">Bästa runda</div>
-            <div className={`mt-1 text-lg font-bold ${stats.bastaMotPar <= 0 ? "text-primary" : "text-destructive"}`}>
-              {formatSigned(stats.bastaMotPar, 0)}
-            </div>
-          </div>
+function shortCourseName(name: string) {
+  return name.length > 16 ? `${name.slice(0, 14)}…` : name
+}
 
-          <div className="rounded-lg bg-secondary/40 p-3">
-            <div className="text-xs text-muted-foreground">Sämsta runda</div>
-            <div className={`mt-1 text-lg font-bold ${stats.samstaMotPar <= 0 ? "text-primary" : "text-destructive"}`}>
-              {formatSigned(stats.samstaMotPar, 0)}
-            </div>
-          </div>
-        </div>
+function isMajor(value: string | null | undefined) {
+  if (!value) return false
+  return ["ja", "true", "1", "major"].includes(value.toLowerCase())
+}
 
-        {/* Player stats */}
-        <div className="grid gap-2 sm:grid-cols-2">
-          <div className="flex items-center gap-3 rounded-lg bg-primary/5 px-3 py-2.5">
-            <Trophy className="h-4 w-4 text-primary" />
-            <div className="flex-1">
-              <div className="text-xs font-medium text-muted-foreground">Bästa spelare</div>
-              <div className="text-sm font-semibold text-foreground">
-                {stats.bastaSpelare.spelare}
-              </div>
-              <div className="text-xs text-muted-foreground">
-                {formatSigned(stats.bastaSpelare.snittMotPar)} i snitt
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3 rounded-lg bg-destructive/5 px-3 py-2.5">
-            <Skull className="h-4 w-4 text-destructive" />
-            <div className="flex-1">
-              <div className="text-xs font-medium text-muted-foreground">Sämsta spelare</div>
-              <div className="text-sm font-semibold text-foreground">
-                {stats.samstaSpelare.spelare}
-              </div>
-              <div className="text-xs text-muted-foreground">
-                {formatSigned(stats.samstaSpelare.snittMotPar)} i snitt
-              </div>
-            </div>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  )
+function chartColor(index: number) {
+  return COLORS[index % COLORS.length]
 }
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
@@ -151,6 +133,8 @@ export default function BanorPage() {
 
   const [competitions, setCompetitions] = useState<CompetitionRow[]>([])
   const [lbRows, setLbRows] = useState<LBRow[]>([])
+  const [years, setYears] = useState<number[]>([])
+  const [selectedYear, setSelectedYear] = useState<string>("all")
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -167,8 +151,9 @@ export default function BanorPage() {
       ] = await Promise.all([
         supabase
           .from(COMP_TABLE)
-          .select("datum, bana")
-          .order("datum", { ascending: false }),
+          .select("datum, bana, plats, major, ar:år")
+          .order("datum", { ascending: false })
+          .returns<CompetitionRow[]>(),
 
         supabase
           .from(LB_TABLE)
@@ -181,7 +166,8 @@ export default function BanorPage() {
             antal_spelare,
             motPar:mot_par
           `
-          ),
+          )
+          .returns<LBRow[]>(),
       ])
 
       if (cancelled) return
@@ -191,224 +177,729 @@ export default function BanorPage() {
         setLoading(false)
         return
       }
+
       if (lbError) {
         setError(lbError.message)
         setLoading(false)
         return
       }
 
-      setCompetitions((compData ?? []) as CompetitionRow[])
-      setLbRows((lbData ?? []) as LBRow[])
+      const comps = (compData ?? []) as CompetitionRow[]
+      const rows = (lbData ?? []) as LBRow[]
+
+      const compYears = comps
+        .map((r) => yearFromDate(r.datum))
+        .filter((y) => Number.isFinite(y))
+
+      const lbYears = rows
+        .map((r) => yearFromDate(r.tavling))
+        .filter((y) => Number.isFinite(y))
+
+      const uniqYears = Array.from(new Set([...compYears, ...lbYears])).sort(
+        (a, b) => b - a
+      )
+
+      setCompetitions(comps)
+      setLbRows(rows)
+      setYears(uniqYears)
       setLoading(false)
     }
 
     load()
+
     return () => {
       cancelled = true
     }
   }, [supabase])
 
-  // ── Derived data ───────────────────────────────────────────────────────────
+  const dashboard = useMemo(() => {
+    const yearFilter =
+      selectedYear === "all" ? null : Number.parseInt(selectedYear, 10)
 
-  const courseStats = useMemo((): CourseStats[] => {
-    if (lbRows.length === 0 || competitions.length === 0) return []
+    const filteredCompetitions = competitions.filter((c) => {
+      if (!yearFilter) return true
+      return yearFromDate(c.datum) === yearFilter
+    })
 
-    // Build lookup: date → course name
-    const compLookup = new Map<string, string | null>()
-    for (const c of competitions) {
-      compLookup.set(c.datum, c.bana)
+    const filteredRows = lbRows.filter((r) => {
+      if (!yearFilter) return true
+      return yearFromDate(r.tavling) === yearFilter
+    })
+
+    const compLookup = new Map<string, CompetitionRow>()
+
+    for (const c of filteredCompetitions) {
+      compLookup.set(c.datum, c)
     }
 
-    // Group leaderboard by course
     const byCourse = new Map<string, LBRow[]>()
-    for (const r of lbRows) {
-      const bana = compLookup.get(r.tavling)
-      const courseKey = bana ?? `[Okänd] ${r.tavling}`
+
+    for (const r of filteredRows) {
+      const comp = compLookup.get(r.tavling)
+      const courseKey = comp?.bana ?? `[Okänd] ${r.tavling}`
 
       const arr = byCourse.get(courseKey) ?? []
       arr.push(r)
       byCourse.set(courseKey, arr)
     }
 
-    // Calculate stats per course
-    const stats: CourseStats[] = Array.from(byCourse.entries()).map(
+    const courseStats: CourseStats[] = Array.from(byCourse.entries()).map(
       ([bana, rows]) => {
-        const withPar = rows.filter((r) => r.motPar !== null && r.motPar !== undefined)
         const played = rows.filter((r) => Number(r.placering) > 0)
+        const withPar = played.filter(
+          (r) => r.motPar !== null && r.motPar !== undefined
+        )
 
-        // Aggregate per player on this course
-        const playerStats = new Map<string, { motParSum: number; motParCount: number; poangSum: number; poangCount: number }>()
-        for (const r of rows) {
+        const dates = Array.from(new Set(played.map((r) => r.tavling))).sort()
+        const latestDate = dates.at(-1) ?? null
+
+        const compsForCourse = dates
+          .map((d) => compLookup.get(d))
+          .filter(Boolean) as CompetitionRow[]
+
+        const latestWinner =
+          latestDate &&
+          played.find(
+            (r) => r.tavling === latestDate && Number(r.placering) === 1
+          )?.spelare
+
+        const playerStats = new Map<
+          string,
+          { motParSum: number; motParCount: number }
+        >()
+
+        for (const r of withPar) {
           const cur = playerStats.get(r.spelare) ?? {
             motParSum: 0,
             motParCount: 0,
-            poangSum: 0,
-            poangCount: 0,
           }
-          if (r.motPar !== null && r.motPar !== undefined) {
-            cur.motParSum += Number(r.motPar)
-            cur.motParCount += 1
-          }
-          if (Number(r.placering) > 0) {
-            cur.poangSum += Number(r.poang ?? 0)
-            cur.poangCount += 1
-          }
+
+          cur.motParSum += Number(r.motPar ?? 0)
+          cur.motParCount += 1
+
           playerStats.set(r.spelare, cur)
         }
 
-        // Find best and worst players
-        let bastaSpelare = { spelare: "–", snittMotPar: 0 }
-        let samstaSpelare = { spelare: "–", snittMotPar: 0 }
+        const playerList = Array.from(playerStats.entries())
+          .filter(([, p]) => p.motParCount > 0)
+          .map(([spelare, p]) => ({
+            spelare,
+            snittMotPar: p.motParSum / p.motParCount,
+          }))
+          .sort((a, b) => a.snittMotPar - b.snittMotPar)
 
-        if (playerStats.size > 0) {
-          const playerList = Array.from(playerStats.entries())
-            .filter(([, p]) => p.motParCount > 0)
-            .map(([spelare, p]) => ({
-              spelare,
-              snittMotPar: p.motParSum / p.motParCount,
-            }))
-            .sort((a, b) => a.snittMotPar - b.snittMotPar)
+        const sortedRounds = withPar
+          .map((r) => ({
+            spelare: r.spelare,
+            motPar: Number(r.motPar ?? 0),
+            datum: r.tavling,
+          }))
+          .sort((a, b) => a.motPar - b.motPar)
 
-          if (playerList.length > 0) {
-            bastaSpelare = playerList[0]
-            samstaSpelare = playerList[playerList.length - 1]
-          }
-        }
+        const firstKnownPlace =
+          compsForCourse.find((c) => c.plats && c.plats.trim() !== "")?.plats ??
+          null
 
         return {
           bana,
-          antalGanger: new Set(rows.map((r) => r.tavling)).size,
+          plats: firstKnownPlace,
+          antalGanger: dates.length,
+          antalRonder: played.length,
+          antalMajors: compsForCourse.filter((c) => isMajor(c.major)).length,
           snittMotPar:
             withPar.length > 0
-              ? withPar.reduce((s, r) => s + Number(r.motPar ?? 0), 0) /
-                withPar.length
-              : 0,
+              ? withPar.reduce((s, r) => s + Number(r.motPar ?? 0), 0) / withPar.length
+              : null,
           bastaMotPar:
-            withPar.length > 0
-              ? Math.min(...withPar.map((r) => Number(r.motPar ?? 0)))
-              : 0,
+            sortedRounds.length > 0 ? sortedRounds[0].motPar : null,
           samstaMotPar:
-            withPar.length > 0
-              ? Math.max(...withPar.map((r) => Number(r.motPar ?? 0)))
-              : 0,
-          bastaSpelare,
-          samstaSpelare,
+            sortedRounds.length > 0
+              ? sortedRounds[sortedRounds.length - 1].motPar
+              : null,
           snittPoang:
             played.length > 0
-              ? played.reduce((s, r) => s + Number(r.poang ?? 0), 0) /
-                played.length
-              : 0,
+              ? played.reduce((s, r) => s + Number(r.poang ?? 0), 0) / played.length
+              : null,
+          latestDate,
+          latestWinner: latestWinner ?? null,
+          bestRound: sortedRounds[0] ?? null,
+          worstRound: sortedRounds[sortedRounds.length - 1] ?? null,
+          bastaSpelare: playerList[0] ?? null,
+          samstaSpelare: playerList[playerList.length - 1] ?? null,
         }
       }
     )
 
-    // Sort by times played (descending)
-    return stats.sort((a, b) => b.antalGanger - a.antalGanger)
-  }, [lbRows, competitions])
+    courseStats.sort((a, b) => {
+      if (b.antalGanger !== a.antalGanger) return b.antalGanger - a.antalGanger
 
-  // Chart data: distribution of vs par per course
+      const aPar = a.snittMotPar ?? 999
+      const bPar = b.snittMotPar ?? 999
+
+      return aPar - bPar
+    })
+
+    const mostPlayed = courseStats[0] ?? null
+
+    const easiestCourse =
+      courseStats
+        .filter((c) => c.snittMotPar !== null)
+        .sort((a, b) => Number(a.snittMotPar) - Number(b.snittMotPar))[0] ?? null
+
+    const hardestCourse =
+      courseStats
+        .filter((c) => c.snittMotPar !== null)
+        .sort((a, b) => Number(b.snittMotPar) - Number(a.snittMotPar))[0] ?? null
+
+    const bestRound =
+      courseStats
+        .flatMap((c) =>
+          c.bestRound
+            ? [
+                {
+                  bana: c.bana,
+                  ...c.bestRound,
+                },
+              ]
+            : []
+        )
+        .sort((a, b) => a.motPar - b.motPar)[0] ?? null
+
+    const totalRounds = courseStats.reduce((s, c) => s + c.antalRonder, 0)
+    const totalPlayedCompetitions = courseStats.reduce(
+      (s, c) => s + c.antalGanger,
+      0
+    )
+
+    return {
+      courseStats,
+      mostPlayed,
+      easiestCourse,
+      hardestCourse,
+      bestRound,
+      totalRounds,
+      totalPlayedCompetitions,
+    }
+  }, [competitions, lbRows, selectedYear])
+
   const chartData = useMemo(() => {
-    return courseStats.map((c) => ({
-      name: c.bana.length > 12 ? c.bana.slice(0, 10) + "…" : c.bana,
-      snittMotPar: parseFloat(c.snittMotPar.toFixed(1)),
-    }))
-  }, [courseStats])
-
-  // ── Render ─────────────────────────────────────────────────────────────────
+    return dashboard.courseStats
+      .filter((c) => c.snittMotPar !== null)
+      .map((c) => ({
+        name: shortCourseName(c.bana),
+        fullName: c.bana,
+        snittMotPar: Number(c.snittMotPar?.toFixed(1) ?? 0),
+      }))
+  }, [dashboard.courseStats])
 
   return (
     <div className="flex flex-col gap-6">
-      {/* Title */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-foreground">Banstatistik</h1>
-        <span className="rounded-full bg-secondary px-3 py-1 text-sm font-semibold text-muted-foreground">
-          {loading ? "Laddar…" : `${courseStats.length} banor`}
-        </span>
-      </div>
+      <section className="relative overflow-hidden rounded-3xl border border-border bg-card p-6 shadow-sm sm:p-8">
+        <div className="absolute -right-20 -top-20 h-56 w-56 rounded-full bg-primary/10" />
+        <div className="absolute -bottom-24 left-1/4 h-56 w-56 rounded-full bg-secondary/70" />
 
-      {/* Error */}
-      {error && (
-        <Card>
-          <CardContent className="py-5">
-            <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm">
-              <div className="font-medium text-foreground">Kunde inte hämta data</div>
-              <div className="text-muted-foreground">{error}</div>
+        <div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <div className="mb-3 inline-flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-xs font-bold uppercase tracking-wide text-primary">
+              <Sparkles className="h-3.5 w-3.5" />
+              Course book
             </div>
-          </CardContent>
-        </Card>
+
+            <h1 className="text-3xl font-extrabold tracking-tight text-foreground sm:text-4xl">
+              Banstatistik
+            </h1>
+
+            <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground sm:text-base">
+              Banor, snitt mot par, bästa rundor, sämsta rundor och vilka spelare
+              som presterat bäst per bana.
+            </p>
+          </div>
+
+          <Select value={selectedYear} onValueChange={setSelectedYear}>
+            <SelectTrigger className="w-full sm:w-44">
+              <SelectValue placeholder="Välj år" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Alla år</SelectItem>
+              {years.map((y) => (
+                <SelectItem key={y} value={String(y)}>
+                  {y}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </section>
+
+      {error && (
+        <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-4 text-sm">
+          <div className="flex items-center gap-2 font-semibold text-foreground">
+            <AlertTriangle className="h-4 w-4 text-destructive" />
+            Kunde inte hämta data
+          </div>
+          <div className="mt-1 text-muted-foreground">{error}</div>
+        </div>
       )}
 
       {loading ? (
-        <div className="grid gap-4 sm:grid-cols-2">
-          {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="h-64 animate-pulse rounded-lg bg-muted" />
-          ))}
-        </div>
-      ) : courseStats.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center gap-4 py-12">
-            <MapPin className="h-12 w-12 text-muted-foreground" />
-            <p className="text-center text-muted-foreground">
-              Inga banor hittades. Se till att tävlingarna har bannamn i
-              competitions-tabellen.
-            </p>
-          </CardContent>
-        </Card>
+        <LoadingState />
+      ) : dashboard.courseStats.length === 0 ? (
+        <EmptyState />
       ) : (
         <>
-          {/* ── Snitt mot par chart ── */}
+          <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <StatCard
+              title="Banor"
+              value={`${dashboard.courseStats.length} st`}
+              sub={`${dashboard.totalPlayedCompetitions} spelade deltävlingar`}
+              icon={MapPin}
+            />
+
+            <StatCard
+              title="Mest spelad"
+              value={dashboard.mostPlayed?.bana ?? "Saknas"}
+              sub={
+                dashboard.mostPlayed
+                  ? `${dashboard.mostPlayed.antalGanger} gånger`
+                  : "Ingen data"
+              }
+              icon={Flag}
+            />
+
+            <StatCard
+              title="Lättaste bana"
+              value={dashboard.easiestCourse?.bana ?? "Saknas"}
+              sub={
+                dashboard.easiestCourse
+                  ? `${formatSigned(dashboard.easiestCourse.snittMotPar)} i snitt`
+                  : "Ingen mot-par-data"
+              }
+              icon={TrendingUp}
+            />
+
+            <StatCard
+              title="Tuffaste bana"
+              value={dashboard.hardestCourse?.bana ?? "Saknas"}
+              sub={
+                dashboard.hardestCourse
+                  ? `${formatSigned(dashboard.hardestCourse.snittMotPar)} i snitt`
+                  : "Ingen mot-par-data"
+              }
+              icon={TrendingDown}
+            />
+          </section>
+
+          <section className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-lg">
+                  <BarChart3 className="h-5 w-5 text-primary" />
+                  Snitt mot par per bana
+                </CardTitle>
+              </CardHeader>
+
+              <CardContent>
+                <div className="h-96">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={chartData}
+                      margin={{ top: 10, right: 10, left: 0, bottom: 20 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" opacity={0.25} />
+                      <XAxis
+                        dataKey="name"
+                        tick={{ fontSize: 12 }}
+                        interval={0}
+                        angle={-20}
+                        textAnchor="end"
+                      />
+                      <YAxis tick={{ fontSize: 12 }} />
+                      <Tooltip
+                        formatter={(value) => [
+                          formatSigned(Number(value), 1),
+                          "Snitt mot par",
+                        ]}
+                        labelFormatter={(label, payload) => {
+                          const item = payload?.[0]?.payload as
+                            | { fullName?: string }
+                            | undefined
+                          return item?.fullName ?? label
+                        }}
+                      />
+                      <Bar dataKey="snittMotPar" radius={[8, 8, 0, 0]}>
+                        {chartData.map((_, i) => (
+                          <Cell key={i} fill={chartColor(i)} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-lg">
+                  <Star className="h-5 w-5 text-primary" />
+                  Bästa noteringen
+                </CardTitle>
+              </CardHeader>
+
+              <CardContent>
+                {dashboard.bestRound ? (
+                  <div className="flex flex-col gap-4">
+                    <div className="rounded-2xl bg-primary/10 p-5">
+                      <div className="text-sm font-semibold text-primary">
+                        Bästa runda all-time
+                      </div>
+                      <div className="mt-2 text-4xl font-black tracking-tight text-foreground">
+                        {formatSigned(dashboard.bestRound.motPar, 0)}
+                      </div>
+                      <div className="mt-2 text-sm text-muted-foreground">
+                        {dashboard.bestRound.spelare} · {dashboard.bestRound.bana}
+                      </div>
+                      <div className="text-sm text-muted-foreground">
+                        {formatDate(dashboard.bestRound.datum)}
+                      </div>
+                    </div>
+
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <InfoBox
+                        label="Totala ronder"
+                        value={dashboard.totalRounds}
+                        icon={Target}
+                      />
+                      <InfoBox
+                        label="Filter"
+                        value={selectedYear === "all" ? "Alla år" : selectedYear}
+                        icon={CalendarDays}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    Ingen runda med mot-par-data hittades.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          </section>
+
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-lg">
-                <BarChart3 className="h-5 w-5 text-primary" />
-                Snitt mot par per bana
+                <MapPin className="h-5 w-5 text-primary" />
+                Banor
               </CardTitle>
             </CardHeader>
+
             <CardContent>
-              <div className="h-80">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart
-                    data={chartData}
-                    margin={{ top: 10, right: 20, left: 10, bottom: 60 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis
-                      dataKey="name"
-                      angle={-45}
-                      textAnchor="end"
-                      height={80}
-                      tick={{ fontSize: 12 }}
-                    />
-                    <YAxis tick={{ fontSize: 12 }} />
-                    <Tooltip
-                      formatter={(value) => [formatSigned(Number(value)), "Snitt mot par"]}
-                    />
-                    <Bar dataKey="snittMotPar" radius={[6, 6, 0, 0]}>
-                      {chartData.map((d, i) => (
-                        <Cell
-                          key={i}
-                          fill={
-                            Number(d.snittMotPar) <= 0
-                              ? "var(--color-chart-2)"
-                              : "var(--color-chart-1)"
-                          }
-                        />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
+              <div className="grid gap-4 lg:grid-cols-2">
+                {dashboard.courseStats.map((stats) => (
+                  <CourseCard key={stats.bana} stats={stats} />
+                ))}
               </div>
             </CardContent>
           </Card>
-
-          {/* ── Individual course cards ── */}
-          <div className="grid gap-4 sm:grid-cols-2">
-            {courseStats.map((stats) => (
-              <CourseCard key={stats.bana} stats={stats} />
-            ))}
-          </div>
         </>
       )}
     </div>
+  )
+}
+
+// ─── Components ───────────────────────────────────────────────────────────────
+
+function StatCard({
+  title,
+  value,
+  sub,
+  icon: Icon,
+}: {
+  title: string
+  value: ReactNode
+  sub: string
+  icon: ComponentType<{ className?: string }>
+}) {
+  return (
+    <Card>
+      <CardContent className="flex h-full flex-col justify-between gap-4 p-5">
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-sm font-medium text-muted-foreground">{title}</div>
+          <div className="rounded-lg bg-primary/10 p-2 text-primary">
+            <Icon className="h-4 w-4" />
+          </div>
+        </div>
+
+        <div>
+          <div className="text-2xl font-extrabold tracking-tight text-foreground">
+            {value}
+          </div>
+          <div className="mt-1 text-sm text-muted-foreground">{sub}</div>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function InfoBox({
+  label,
+  value,
+  icon: Icon,
+}: {
+  label: string
+  value: ReactNode
+  icon: ComponentType<{ className?: string }>
+}) {
+  return (
+    <div className="rounded-2xl border border-border bg-secondary/30 p-4">
+      <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+        <Icon className="h-4 w-4 text-primary" />
+        {label}
+      </div>
+      <div className="mt-2 font-bold text-foreground">{value}</div>
+    </div>
+  )
+}
+
+function CourseCard({ stats }: { stats: CourseStats }) {
+  const snittClass =
+    stats.snittMotPar !== null && stats.snittMotPar <= 0
+      ? "text-primary"
+      : "text-destructive"
+
+  return (
+    <div className="relative overflow-hidden rounded-2xl border border-border bg-card p-5 shadow-sm">
+      <div className="absolute -right-10 -top-10 h-28 w-28 rounded-full bg-primary/10" />
+
+      <div className="relative flex flex-col gap-5">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="text-xl font-extrabold tracking-tight text-foreground">
+              {stats.bana}
+            </h3>
+
+            <div className="mt-1 text-sm text-muted-foreground">
+              {stats.plats ?? "Plats saknas"} · spelad {stats.antalGanger}{" "}
+              {stats.antalGanger === 1 ? "gång" : "gånger"}
+            </div>
+
+            {stats.latestDate && (
+              <div className="mt-1 text-xs text-muted-foreground">
+                Senast: {formatDate(stats.latestDate)}
+                {stats.latestWinner ? ` · Vinnare: ${stats.latestWinner}` : ""}
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-2xl bg-primary/10 p-3 text-primary">
+            <MapPin className="h-6 w-6" />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <MiniStat
+            label="Snitt"
+            value={formatSigned(stats.snittMotPar)}
+            icon={BarChart3}
+            valueClass={snittClass}
+          />
+          <MiniStat
+            label="Bästa"
+            value={formatSigned(stats.bastaMotPar, 0)}
+            icon={Trophy}
+            valueClass="text-primary"
+          />
+          <MiniStat
+            label="Sämsta"
+            value={formatSigned(stats.samstaMotPar, 0)}
+            icon={Skull}
+            valueClass="text-destructive"
+          />
+          <MiniStat
+            label="Majors"
+            value={stats.antalMajors}
+            icon={Crown}
+          />
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <PlayerBox
+            label="Bästa spelare"
+            player={stats.bastaSpelare?.spelare ?? "–"}
+            value={
+              stats.bastaSpelare
+                ? `${formatSigned(stats.bastaSpelare.snittMotPar)} i snitt`
+                : "Ingen data"
+            }
+            icon={Flame}
+            positive
+          />
+
+          <PlayerBox
+            label="Sämsta spelare"
+            player={stats.samstaSpelare?.spelare ?? "–"}
+            value={
+              stats.samstaSpelare
+                ? `${formatSigned(stats.samstaSpelare.snittMotPar)} i snitt`
+                : "Ingen data"
+            }
+            icon={TrendingDown}
+            negative
+          />
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <RoundBox
+            label="Bästa runda"
+            round={stats.bestRound}
+            positive
+          />
+
+          <RoundBox
+            label="Sämsta runda"
+            round={stats.worstRound}
+            negative
+          />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function MiniStat({
+  label,
+  value,
+  icon: Icon,
+  valueClass = "text-foreground",
+}: {
+  label: string
+  value: ReactNode
+  icon: ComponentType<{ className?: string }>
+  valueClass?: string
+}) {
+  return (
+    <div className="rounded-xl bg-secondary/40 p-3">
+      <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+        <Icon className="h-3.5 w-3.5 text-primary" />
+        {label}
+      </div>
+      <div className={`mt-1 text-xl font-extrabold tabular-nums ${valueClass}`}>
+        {value}
+      </div>
+    </div>
+  )
+}
+
+function PlayerBox({
+  label,
+  player,
+  value,
+  icon: Icon,
+  positive = false,
+  negative = false,
+}: {
+  label: string
+  player: string
+  value: ReactNode
+  icon: ComponentType<{ className?: string }>
+  positive?: boolean
+  negative?: boolean
+}) {
+  const valueClass = positive
+    ? "text-primary"
+    : negative
+      ? "text-destructive"
+      : "text-foreground"
+
+  return (
+    <div className="rounded-xl border border-border p-3">
+      <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+        <Icon className="h-4 w-4 text-primary" />
+        {label}
+      </div>
+      <div className="mt-2 font-bold text-foreground">{player}</div>
+      <div className={`mt-1 text-sm font-semibold ${valueClass}`}>{value}</div>
+    </div>
+  )
+}
+
+function RoundBox({
+  label,
+  round,
+  positive = false,
+  negative = false,
+}: {
+  label: string
+  round: { spelare: string; motPar: number; datum: string } | null
+  positive?: boolean
+  negative?: boolean
+}) {
+  const valueClass = positive
+    ? "text-primary"
+    : negative
+      ? "text-destructive"
+      : "text-foreground"
+
+  return (
+    <div className="rounded-xl bg-secondary/30 p-3">
+      <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+        {label}
+      </div>
+
+      {round ? (
+        <>
+          <div className={`mt-1 text-xl font-black tabular-nums ${valueClass}`}>
+            {formatSigned(round.motPar, 0)}
+          </div>
+          <div className="mt-1 text-sm text-muted-foreground">
+            {round.spelare} · {formatDate(round.datum)}
+          </div>
+        </>
+      ) : (
+        <div className="mt-1 text-sm text-muted-foreground">Ingen data</div>
+      )}
+    </div>
+  )
+}
+
+function LoadingState() {
+  return (
+    <div className="flex flex-col gap-6">
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {[1, 2, 3, 4].map((i) => (
+          <div key={i} className="h-32 animate-pulse rounded-2xl bg-muted" />
+        ))}
+      </section>
+
+      <div className="h-96 animate-pulse rounded-2xl bg-muted" />
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        {[1, 2, 3, 4].map((i) => (
+          <div key={i} className="h-80 animate-pulse rounded-2xl bg-muted" />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function EmptyState() {
+  return (
+    <Card>
+      <CardContent className="flex flex-col items-center justify-center gap-3 p-10 text-center">
+        <div className="rounded-full bg-secondary p-4">
+          <MapPin className="h-8 w-8 text-muted-foreground" />
+        </div>
+
+        <div>
+          <div className="text-lg font-bold text-foreground">
+            Inga banor hittades
+          </div>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Kontrollera att tävlingarna har bannamn i competitions-tabellen och
+            att leaderboarden innehåller resultat.
+          </p>
+        </div>
+      </CardContent>
+    </Card>
   )
 }
