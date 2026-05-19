@@ -3,7 +3,7 @@ import Link from "next/link"
 import type { ComponentType } from "react"
 
 import { Card, CardContent } from "@/components/ui/card"
-import { Instagram, Trophy, CalendarDays, Banknote, Images, Timer, Users, Settings, BookOpen } from "lucide-react"
+import { Instagram, Trophy, CalendarDays, Banknote, Images, Timer, Users, BookOpen, MapPin } from "lucide-react"
 
 export default function HomePage() {
   return (
@@ -59,6 +59,7 @@ export default function HomePage() {
         <QuickLink href="/leaderboard" icon={Trophy} title="Leaderboard" desc="Poängställning och utveckling" />
         <QuickLink href="/spelschema" icon={CalendarDays} title="Spelschema" desc="Deltävlingar per år" />
         <QuickLink href="/boter" icon={Banknote} title="Böteskassa" desc="Böter, total och per spelare" />
+        <QuickLink href="/banor" icon={MapPin} title="Banor" desc="Statistik per golfbana" />
         <QuickLink href="/bilder" icon={Images} title="Bilder" desc="Lagbilder och minnen" />
         <QuickLink href="/countdown" icon={Timer} title="Countdown" desc="Nedräkning till finalen" />
         <QuickLink href="/spelare" icon={Users} title="Spelare" desc="Aktiva + historiska" />
