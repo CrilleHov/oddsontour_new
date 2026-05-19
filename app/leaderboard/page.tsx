@@ -28,7 +28,6 @@ import {
   Medal,
   RefreshCw,
   Settings,
-  Skull,
   Sparkles,
   Target,
   Trophy,
@@ -70,6 +69,10 @@ type Competition = {
 
 type Player = {
   spelarnamn: string
+}
+
+type PlayerSeasonRow = {
+  spelare: string
 }
 
 type SummaryRow = {
@@ -116,6 +119,7 @@ type TooltipPayloadItem = {
 const COMP_TABLE = "competitions"
 const LB_TABLE = "leaderboard"
 const PLAYERS_TABLE = "spelare"
+const PLAYER_SEASONS_TABLE = "spelare_sasong"
 
 const BASE_COLORS = [
   "var(--color-chart-1)",
@@ -277,7 +281,7 @@ function competitionLabel(date: string, competitions: Competition[]) {
 function LineEndLabel(props: {
   x?: number
   y?: number
-  value?: string
+  value?: unknown
   fill?: string
   index?: number
   dataLength: number
@@ -286,7 +290,8 @@ function LineEndLabel(props: {
 
   if (
     index !== dataLength - 1 ||
-    !value ||
+    value === undefined ||
+    value === null ||
     x === undefined ||
     y === undefined
   ) {
@@ -302,7 +307,7 @@ function LineEndLabel(props: {
       fontWeight={700}
       textAnchor="start"
     >
-      {value}
+      {String(value)}
     </text>
   )
 }
@@ -376,6 +381,7 @@ export default function LeaderboardPage() {
   const [loadingMeta, setLoadingMeta] = useState(true)
   const [loadingLB, setLoadingLB] = useState(true)
   const [loadingCompetitions, setLoadingCompetitions] = useState(true)
+  const [loadingPlayers, setLoadingPlayers] = useState(true)
 
   const [error, setError] = useState<string | null>(null)
   const [showAdmin, setShowAdmin] = useState(false)
@@ -397,18 +403,12 @@ export default function LeaderboardPage() {
     const [
       { data: compDates, error: compErr },
       { data: lbDates, error: lbDateErr },
-      { data: playerData, error: playerErr },
     ] = await Promise.all([
       supabase.from(COMP_TABLE).select("datum"),
       supabase.from(LB_TABLE).select("tävling"),
-      supabase
-        .from(PLAYERS_TABLE)
-        .select("spelarnamn")
-        .eq("aktiv", 1)
-        .order("spelarnamn"),
     ])
 
-    const nextErrors = [compErr?.message, lbDateErr?.message, playerErr?.message]
+    const nextErrors = [compErr?.message, lbDateErr?.message]
       .filter(Boolean)
       .join(" | ")
 
@@ -424,38 +424,14 @@ export default function LeaderboardPage() {
       .map((r: { tävling: string }) => yearFromDate(r.tävling))
       .filter((y) => Number.isFinite(y))
 
-    const uniqYears = Array.from(new Set([...compYears, ...leaderboardYears]))
-      .sort((a, b) => b - a)
+    const currentYear = new Date().getFullYear()
+
+    const uniqYears = Array.from(
+      new Set([...compYears, ...leaderboardYears, currentYear])
+    ).sort((a, b) => b - a)
 
     setYears(uniqYears)
     setSelectedYear((prev) => prev ?? uniqYears[0] ?? null)
-
-    const p = (playerData ?? []) as Player[]
-
-    setPlayers(p)
-
-    const names = p.map((x) => x.spelarnamn)
-
-    setPlaceringar((prev) => {
-      const next: Record<string, number> = {}
-
-      for (const n of names) {
-        next[n] = prev[n] ?? 0
-      }
-
-      return next
-    })
-
-    setMotParValues((prev) => {
-      const next: Record<string, string> = {}
-
-      for (const n of names) {
-        next[n] = prev[n] ?? "0"
-      }
-
-      return next
-    })
-
     setLoadingMeta(false)
   }
 
@@ -522,6 +498,75 @@ export default function LeaderboardPage() {
     setLoadingCompetitions(false)
   }
 
+  async function loadPlayersForYear(year: number) {
+    setLoadingPlayers(true)
+
+    const { data, error } = await supabase
+      .from(PLAYER_SEASONS_TABLE)
+      .select("spelare")
+      .eq("ar", year)
+      .eq("aktiv", true)
+      .order("spelare", { ascending: true })
+      .returns<PlayerSeasonRow[]>()
+
+    if (error) {
+      setError(error.message)
+      setPlayers([])
+      setLoadingPlayers(false)
+      return
+    }
+
+    let p: Player[] = (data ?? []).map((r) => ({
+      spelarnamn: r.spelare,
+    }))
+
+    // Fallback om spelare_sasong saknar rader för året.
+    // Då används nuvarande aktiva spelare från spelare-tabellen.
+    if (p.length === 0) {
+      const { data: fallbackData, error: fallbackError } = await supabase
+        .from(PLAYERS_TABLE)
+        .select("spelarnamn")
+        .eq("aktiv", 1)
+        .order("spelarnamn", { ascending: true })
+        .returns<Player[]>()
+
+      if (fallbackError) {
+        setError(fallbackError.message)
+        setPlayers([])
+        setLoadingPlayers(false)
+        return
+      }
+
+      p = fallbackData ?? []
+    }
+
+    setPlayers(p)
+
+    const names = p.map((x) => x.spelarnamn)
+
+    setPlaceringar((prev) => {
+      const next: Record<string, number> = {}
+
+      for (const n of names) {
+        next[n] = prev[n] ?? 0
+      }
+
+      return next
+    })
+
+    setMotParValues((prev) => {
+      const next: Record<string, string> = {}
+
+      for (const n of names) {
+        next[n] = prev[n] ?? "0"
+      }
+
+      return next
+    })
+
+    setLoadingPlayers(false)
+  }
+
   useEffect(() => {
     let cancelled = false
 
@@ -542,6 +587,7 @@ export default function LeaderboardPage() {
     if (!selectedYear) {
       setLoadingLB(false)
       setLoadingCompetitions(false)
+      setLoadingPlayers(false)
       return
     }
 
@@ -550,6 +596,7 @@ export default function LeaderboardPage() {
     Promise.all([
       loadLeaderboard(selectedYear),
       loadCompetitionsForYear(selectedYear),
+      loadPlayersForYear(selectedYear),
     ]).catch((e) => {
       if (!cancelled) setError(String(e))
     })
@@ -782,7 +829,7 @@ export default function LeaderboardPage() {
     }
   }, [rows, competitions])
 
-  const loading = loadingMeta || loadingLB || loadingCompetitions
+  const loading = loadingMeta || loadingLB || loadingCompetitions || loadingPlayers
 
   // ── Submit ─────────────────────────────────────────────────────────────────
 
@@ -1162,9 +1209,11 @@ export default function LeaderboardPage() {
                 size="sm"
                 onClick={() => {
                   void loadMeta()
+
                   if (selectedYear) {
                     void loadLeaderboard(selectedYear)
                     void loadCompetitionsForYear(selectedYear)
+                    void loadPlayersForYear(selectedYear)
                   }
                 }}
                 disabled={loadingMeta}
@@ -1178,9 +1227,25 @@ export default function LeaderboardPage() {
 
           <CardContent className="space-y-5">
             <p className="text-sm text-muted-foreground">
-              Fyll i tävling, placering och mot par för respektive spelare. Om
-              någon inte spelade, fyll i 0 i placering.
+              Fyll i tävling, placering och mot par för respektive spelare.
+              Spelarlistan baseras på vilka som är aktiva för valt år. Om någon
+              inte spelade, fyll i 0 i placering.
             </p>
+
+            {loadingPlayers ? (
+              <div className="rounded-2xl bg-muted p-4 text-sm text-muted-foreground">
+                Laddar spelare för valt år...
+              </div>
+            ) : players.length === 0 ? (
+              <div className="rounded-2xl border border-destructive/40 bg-destructive/10 p-4 text-sm">
+                <div className="font-semibold text-foreground">
+                  Inga spelare hittades för valt år
+                </div>
+                <div className="mt-1 text-muted-foreground">
+                  Lägg in spelare i tabellen spelare_sasong för {selectedYear}.
+                </div>
+              </div>
+            ) : null}
 
             <div className="grid gap-4 md:grid-cols-4">
               <div className="space-y-2">
@@ -1313,7 +1378,7 @@ export default function LeaderboardPage() {
 
               <Button
                 onClick={handleLeaderboardSubmit}
-                disabled={submitting}
+                disabled={submitting || players.length === 0}
                 className="h-10"
               >
                 {submitting ? "Sparar..." : "Uppdatera leaderboard"}
