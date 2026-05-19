@@ -70,7 +70,7 @@ type ShameRow = {
 }
 
 const PLAYERS_TABLE = "spelare"
-const FEES_TABLE = "böter"
+const FEES_TABLE = "fees"
 const TOT_TABLE = "tot_böter"
 
 const RULES = [
