@@ -7,16 +7,6 @@ import { BookOpen, Trophy, ClipboardList, Flame, Star, Skull, Target, TrendingUp
 
 // ─── Static data ──────────────────────────────────────────────────────────────
 
-const WINNERS = [
-  { year: 2019, final: "Race to Sand",  winner: "Alvin Andersson" },
-  { year: 2020, final: "Race to Hooks", winner: "Christian Hovstadius" },
-  { year: 2021, final: "Race to Sand",  winner: "Jesper Fransson" },
-  { year: 2022, final: "Race to Sand",  winner: "Lukas Hafström" },
-  { year: 2023, final: "Race to Sand",  winner: "Alvin Andersson" },
-  { year: 2024, final: "Race to Hills", winner: "Jesper Fransson" },
-  { year: 2025, final: "Race to Hills", winner: "Viktor Andersson" },
-]
-
 const RESPONSIBILITIES = [
   { area: "Sociala medier",                    who: "Benne & Axel" },
   { area: "Sponsor",                           who: "Alvin & Frasse" },
@@ -47,7 +37,14 @@ type RecordItem = {
   sub?: string
 }
 
+type WinnerRow = {
+  spelarnamn: string
+  ar: number
+  final: string | null
+}
+
 const LB_TABLE = "leaderboard"
+const WINNERS_TABLE = "historiska_vinnare"
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -56,11 +53,10 @@ function formatSigned(n: number, decimals = 1): string {
   return val > 0 ? `+${val}` : `${val}`
 }
 
-// Count tour wins per player from hardcoded list
-function tourWins(): Map<string, number> {
+function calcTourWins(winners: WinnerRow[]): Map<string, number> {
   const map = new Map<string, number>()
-  for (const w of WINNERS) {
-    map.set(w.winner, (map.get(w.winner) ?? 0) + 1)
+  for (const w of winners) {
+    map.set(w.spelarnamn, (map.get(w.spelarnamn) ?? 0) + 1)
   }
   return map
 }
@@ -94,7 +90,7 @@ function RecordCard({ item }: { item: RecordItem }) {
 
 // ─── All-time records ─────────────────────────────────────────────────────────
 
-function AllTimeRecords({ rows }: { rows: LBRow[] }) {
+function AllTimeRecords({ rows, winners }: { rows: LBRow[]; winners: WinnerRow[] }) {
   const records = useMemo((): RecordItem[] => {
     if (rows.length === 0) return []
 
@@ -176,8 +172,8 @@ function AllTimeRecords({ rows }: { rows: LBRow[] }) {
       .map(([spelare, a]) => ({ spelare, v: a.antalSista }))
       .sort((a, b) => b.v - a.v)[0]
 
-    // ── 8. Flest tourvinster (från statisk lista) ──
-    const twMap = tourWins()
+    // ── 8. Flest tourvinster (från Supabase) ──
+    const twMap = calcTourWins(winners)
     const mostTourWins = Array.from(twMap.entries())
       .map(([spelare, v]) => ({ spelare, v }))
       .sort((a, b) => b.v - a.v)[0]
@@ -191,9 +187,11 @@ function AllTimeRecords({ rows }: { rows: LBRow[] }) {
         value: `${mostTourWins.v} st`,
         icon: <Trophy className="h-4 w-4" />,
         highlight: "gold",
-        sub: `${WINNERS.filter((w) => w.winner === mostTourWins.spelare)
-          .map((w) => w.year)
-          .join(", ")}`,
+        sub: winners
+          .filter((w) => w.spelarnamn === mostTourWins.spelare)
+          .map((w) => w.ar)
+          .sort()
+          .join(", "),
       })
     }
 
@@ -273,7 +271,7 @@ function AllTimeRecords({ rows }: { rows: LBRow[] }) {
     return result
   }, [rows])
 
-  if (rows.length === 0) {
+  if (rows.length === 0 && winners.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
         Ingen data hittades i leaderboard.
@@ -296,11 +294,11 @@ export default function HistoriaPage() {
   const supabase = useMemo(() => createClient(), [])
 
   const [lbRows, setLbRows] = useState<LBRow[]>([])
+  const [winners, setWinners] = useState<WinnerRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // Count tour wins per winner for the badge in the winners list
-  const tourWinCounts = useMemo(() => tourWins(), [])
+  const tourWinCounts = useMemo(() => calcTourWins(winners), [winners])
 
   useEffect(() => {
     let cancelled = false
@@ -309,36 +307,42 @@ export default function HistoriaPage() {
       setLoading(true)
       setError(null)
 
-      const { data, error } = await supabase
-        .from(LB_TABLE)
-        .select(
+      const [
+        { data: lbData, error: lbError },
+        { data: winnersData, error: winnersError },
+      ] = await Promise.all([
+        supabase
+          .from(LB_TABLE)
+          .select(
+            `
+            tavling:tävling,
+            spelare,
+            poang:poäng,
+            placering,
+            antal_spelare,
+            motPar:mot_par
           `
-          tavling:tävling,
-          spelare,
-          poang:poäng,
-          placering,
-          antal_spelare,
-          motPar:mot_par
-        `
-        )
-        .returns<LBRow[]>()
+          )
+          .returns<LBRow[]>(),
+
+        supabase
+          .from(WINNERS_TABLE)
+          .select("spelarnamn, ar, final")
+          .order("ar", { ascending: false }),
+      ])
 
       if (cancelled) return
 
-      if (error) {
-        setError(error.message)
-        setLoading(false)
-        return
-      }
+      if (lbError) { setError(lbError.message); setLoading(false); return }
+      if (winnersError) { setError(winnersError.message); setLoading(false); return }
 
-      setLbRows((data ?? []) as LBRow[])
+      setLbRows((lbData ?? []) as LBRow[])
+      setWinners((winnersData ?? []) as WinnerRow[])
       setLoading(false)
     }
 
     load()
-    return () => {
-      cancelled = true
-    }
+    return () => { cancelled = true }
   }, [supabase])
 
   return (
@@ -396,7 +400,7 @@ export default function HistoriaPage() {
               ))}
             </div>
           ) : (
-            <AllTimeRecords rows={lbRows} />
+            <AllTimeRecords rows={lbRows} winners={winners} />
           )}
         </CardContent>
       </Card>
@@ -410,35 +414,43 @@ export default function HistoriaPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="text-sm text-muted-foreground">
-          <div className="flex flex-col gap-2">
-            {[...WINNERS].reverse().map((w) => {
-              const wins = tourWinCounts.get(w.winner) ?? 0
-              return (
-                <div
-                  key={w.year}
-                  className="flex items-center justify-between rounded-md bg-secondary/40 px-3 py-2"
-                >
+          {winners.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              {loading ? "Laddar..." : "Inga vinnare registrerade ännu."}
+            </p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {winners.map((w) => {
+                const wins = tourWinCounts.get(w.spelarnamn) ?? 0
+                return (
+                  <div
+                    key={w.ar}
+                    className="flex items-center justify-between rounded-md bg-secondary/40 px-3 py-2"
+                  >
                   <div className="flex items-center gap-3">
-                    <span className="font-medium text-foreground">{w.year}</span>
-                    <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
-                      {w.final}
-                    </span>
+                      <span className="font-medium text-foreground">{w.ar}</span>
+                      {w.final && (
+                        <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+                          {w.final}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-foreground">{w.spelarnamn}</span>
+                      {wins >= 2 && (
+                        <span
+                          className="rounded-full bg-chart-2/20 px-1.5 py-0.5 text-xs font-semibold text-primary"
+                          title={`${wins} tourvinster`}
+                        >
+                          ×{wins}
+                        </span>
+                      )}
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-foreground">{w.winner}</span>
-                    {wins >= 2 && (
-                      <span
-                        className="rounded-full bg-chart-2/20 px-1.5 py-0.5 text-xs font-semibold text-primary"
-                        title={`${wins} tourvinster`}
-                      >
-                        ×{wins}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
+                )
+              })}
+            </div>
+          )}
         </CardContent>
       </Card>
 
