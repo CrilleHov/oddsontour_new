@@ -496,101 +496,99 @@ export default function BanorPage() {
             />
           </section>
 
-          <section className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-lg">
-                  <BarChart3 className="h-5 w-5 text-primary" />
-                  Snitt mot par per bana
-                </CardTitle>
-              </CardHeader>
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <BarChart3 className="h-5 w-5 text-primary" />
+                Snitt mot par per bana
+              </CardTitle>
+            </CardHeader>
 
-              <CardContent>
-                <div style={{ height: `${Math.max(300, dashboard.courseStats.length * 40)}px` }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                      data={chartData}
-                      layout="vertical"
-                      margin={{ top: 5, right: 30, left: 120, bottom: 5 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" opacity={0.25} />
-                      <XAxis type="number" tick={{ fontSize: 12 }} />
-                      <YAxis
-                        type="category"
-                        dataKey="name"
-                        width={120}
-                        tick={{ fontSize: 12 }}
-                      />
-                      <Tooltip
-                        formatter={(value) => [
-                          formatSigned(Number(value), 1),
-                          "Snitt mot par",
-                        ]}
-                        labelFormatter={(label, payload) => {
-                          const item = payload?.[0]?.payload as
-                            | { fullName?: string }
-                            | undefined
-                          return item?.fullName ?? label
-                        }}
-                      />
-                      <Bar dataKey="snittMotPar" radius={[0, 8, 8, 0]}>
-                        {chartData.map((_, i) => (
-                          <Cell key={i} fill={chartColor(i)} />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </CardContent>
-            </Card>
+            <CardContent>
+              <div style={{ height: `${Math.max(300, dashboard.courseStats.length * 40)}px` }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={chartData}
+                    layout="vertical"
+                    margin={{ top: 5, right: 30, left: 120, bottom: 5 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" opacity={0.25} />
+                    <XAxis type="number" tick={{ fontSize: 12 }} />
+                    <YAxis
+                      type="category"
+                      dataKey="name"
+                      width={120}
+                      tick={{ fontSize: 12 }}
+                    />
+                    <Tooltip
+                      formatter={(value) => [
+                        formatSigned(Number(value), 1),
+                        "Snitt mot par",
+                      ]}
+                      labelFormatter={(label, payload) => {
+                        const item = payload?.[0]?.payload as
+                          | { fullName?: string }
+                          | undefined
+                        return item?.fullName ?? label
+                      }}
+                    />
+                    <Bar dataKey="snittMotPar" radius={[0, 8, 8, 0]}>
+                      {chartData.map((_, i) => (
+                        <Cell key={i} fill={chartColor(i)} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </CardContent>
+          </Card>
 
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-lg">
-                  <Star className="h-5 w-5 text-primary" />
-                  Bästa noteringen
-                </CardTitle>
-              </CardHeader>
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Star className="h-5 w-5 text-primary" />
+                Bästa noteringen
+              </CardTitle>
+            </CardHeader>
 
-              <CardContent>
-                {dashboard.bestRound ? (
-                  <div className="flex flex-col gap-4">
-                    <div className="rounded-2xl bg-primary/10 p-5">
-                      <div className="text-sm font-semibold text-primary">
-                        Bästa runda all-time
-                      </div>
-                      <div className="mt-2 text-4xl font-black tracking-tight text-foreground">
-                        {formatSigned(dashboard.bestRound.motPar, 0)}
-                      </div>
-                      <div className="mt-2 text-sm text-muted-foreground">
-                        {dashboard.bestRound.spelare} · {dashboard.bestRound.bana}
-                      </div>
-                      <div className="text-sm text-muted-foreground">
-                        {formatDate(dashboard.bestRound.datum)}
-                      </div>
+            <CardContent>
+              {dashboard.bestRound ? (
+                <div className="flex flex-col gap-4">
+                  <div className="rounded-2xl bg-primary/10 p-5">
+                    <div className="text-sm font-semibold text-primary">
+                      Bästa runda all-time
                     </div>
-
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <InfoBox
-                        label="Totala ronder"
-                        value={dashboard.totalRounds}
-                        icon={Target}
-                      />
-                      <InfoBox
-                        label="Filter"
-                        value={selectedYear === "all" ? "Alla år" : selectedYear}
-                        icon={CalendarDays}
-                      />
+                    <div className="mt-2 text-4xl font-black tracking-tight text-foreground">
+                      {formatSigned(dashboard.bestRound.motPar, 0)}
+                    </div>
+                    <div className="mt-2 text-sm text-muted-foreground">
+                      {dashboard.bestRound.spelare} · {dashboard.bestRound.bana}
+                    </div>
+                    <div className="text-sm text-muted-foreground">
+                      {formatDate(dashboard.bestRound.datum)}
                     </div>
                   </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground">
-                    Ingen runda med mot-par-data hittades.
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-          </section>
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <InfoBox
+                      label="Totala ronder"
+                      value={dashboard.totalRounds}
+                      icon={Target}
+                    />
+                    <InfoBox
+                      label="Filter"
+                      value={selectedYear === "all" ? "Alla år" : selectedYear}
+                      icon={CalendarDays}
+                    />
+                  </div>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  Ingen runda med mot-par-data hittades.
+                </p>
+              )}
+            </CardContent>
+          </Card>
 
           <Card>
             <CardHeader>
