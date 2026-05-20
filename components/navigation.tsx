@@ -27,13 +27,12 @@ const mainLinks = [
   { href: "/leaderboard", label: "Leaderboard", icon: Trophy },
   { href: "/spelschema", label: "Spelschema", icon: CalendarDays },
   { href: "/boter", label: "Böteskassa", icon: Banknote },
-  
-]
-
-const moreLinks = [
   { href: "/spelare", label: "Spelare", icon: Users },
   { href: "/banor", label: "Banstatistik", icon: MapPin },
   { href: "/hth", label: "Head-to-Head", icon: Swords },
+]
+
+const moreLinks = [
   { href: "/bilder", label: "Bilder", icon: Images },
   { href: "/countdown", label: "Countdown", icon: Timer },
   { href: "/historia", label: "Historia & Info", icon: BookOpen },
