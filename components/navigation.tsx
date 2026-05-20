@@ -30,7 +30,7 @@ const links = [
   { href: "/bilder", label: "Bilder", icon: Images },
   { href: "/countdown", label: "Countdown", icon: Timer },
   { href: "/historia", label: "Historia & Info", icon: BookOpen },
-  { href: "/head-to-head", label: "Head-to-Head", icon: Swords },
+  { href: "/hth", label: "Head-to-Head", icon: Swords },
 ]
 
 export function Navigation() {
