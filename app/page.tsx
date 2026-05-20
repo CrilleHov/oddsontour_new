@@ -23,6 +23,7 @@ import {
   ArrowRight,
   AlertTriangle,
   Loader2,
+  Swords,
 } from "lucide-react"
 
 const SEASON_YEAR = 2026
@@ -594,6 +595,7 @@ export default function HomePage() {
           <QuickLink href="/leaderboard" icon={Trophy} title="Leaderboard" desc="Poängställning och utveckling" />
           <QuickLink href="/spelschema" icon={CalendarDays} title="Spelschema" desc="Deltävlingar per år" />
           <QuickLink href="/boter" icon={Banknote} title="Böteskassa" desc="Böter, total och per spelare" />
+          <QuickLink href="/hth" icon={Swords} title="Head-to-Head" desc="Se vem som slår vem över tid" />
           <QuickLink href="/banor" icon={MapPin} title="Banor" desc="Statistik per golfbana" />
           <QuickLink href="/bilder" icon={Images} title="Bilder" desc="Lagbilder och minnen" />
           <QuickLink href="/countdown" icon={Timer} title="Countdown" desc="Nedräkning till finalen" />
