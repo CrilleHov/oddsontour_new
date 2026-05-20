@@ -393,41 +393,40 @@ export default function HeadToHeadPage() {
             />
           </section>
 
-          {/* Main area */}
-          <section className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex min-w-0 items-center gap-2 text-base sm:text-lg">
-                  <BarChart3 className="h-5 w-5 shrink-0 text-primary" />
-                  <span className="truncate">Matchup-matris</span>
-                </CardTitle>
-              </CardHeader>
+          {/* Matrix */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex min-w-0 items-center gap-2 text-base sm:text-lg">
+                <BarChart3 className="h-5 w-5 shrink-0 text-primary" />
+                <span className="truncate">Matchup-matris</span>
+              </CardTitle>
+            </CardHeader>
 
-              <CardContent>
-                <MatchupMatrix
-                  players={dashboard.players}
-                  matchups={dashboard.matchups}
-                />
-              </CardContent>
-            </Card>
+            <CardContent>
+              <MatchupMatrix
+                players={dashboard.players}
+                matchups={dashboard.matchups}
+              />
+            </CardContent>
+          </Card>
 
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex min-w-0 items-center gap-2 text-base sm:text-lg">
-                  <UserRound className="h-5 w-5 shrink-0 text-primary" />
-                  <span className="truncate">Välj spelare</span>
-                </CardTitle>
-              </CardHeader>
+          {/* Player selector under matrix */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex min-w-0 items-center gap-2 text-base sm:text-lg">
+                <UserRound className="h-5 w-5 shrink-0 text-primary" />
+                <span className="truncate">Välj spelare</span>
+              </CardTitle>
+            </CardHeader>
 
-              <CardContent>
-                <PlayerSelector
-                  players={dashboard.players}
-                  selectedPlayer={selectedPlayer}
-                  onSelect={setSelectedPlayer}
-                />
-              </CardContent>
-            </Card>
-          </section>
+            <CardContent>
+              <PlayerSelector
+                players={dashboard.players}
+                selectedPlayer={selectedPlayer}
+                onSelect={setSelectedPlayer}
+              />
+            </CardContent>
+          </Card>
 
           {/* Selected player */}
           {selectedPlayer && (
@@ -523,10 +522,10 @@ function MatchupMatrix({
   return (
     <div className="flex flex-col gap-3">
       <div className="overflow-x-auto rounded-2xl border border-border">
-        <table className="w-full min-w-[640px] text-sm">
+        <table className="w-full min-w-[560px] text-xs">
           <thead>
             <tr className="border-b border-border bg-secondary/40">
-              <th className="sticky left-0 z-10 max-w-24 bg-secondary px-3 py-3 text-left text-xs font-bold text-foreground sm:max-w-32 sm:text-sm">
+              <th className="sticky left-0 z-10 max-w-20 bg-secondary px-2 py-2 text-left text-[10px] font-bold text-foreground sm:max-w-28 sm:px-3 sm:text-xs">
                 Spelare
               </th>
 
@@ -534,7 +533,7 @@ function MatchupMatrix({
                 <th
                   key={p}
                   title={p}
-                  className="max-w-14 px-2 py-3 text-center text-[10px] font-bold text-muted-foreground sm:max-w-20 sm:text-xs"
+                  className="max-w-10 px-1 py-2 text-center text-[9px] font-bold text-muted-foreground sm:max-w-14 sm:text-[10px]"
                 >
                   <span className="block truncate">{p}</span>
                 </th>
@@ -546,7 +545,7 @@ function MatchupMatrix({
             {players.map((p1) => (
               <tr key={p1} className="border-b border-border/60 last:border-0">
                 <td
-                  className="sticky left-0 z-10 max-w-24 bg-card px-3 py-3 text-xs font-bold text-foreground sm:max-w-32 sm:text-sm"
+                  className="sticky left-0 z-10 max-w-20 bg-card px-2 py-2 text-[10px] font-bold text-foreground sm:max-w-28 sm:px-3 sm:text-xs"
                   title={p1}
                 >
                   <span className="block truncate">{p1}</span>
@@ -555,8 +554,8 @@ function MatchupMatrix({
                 {players.map((p2) => {
                   if (p1 === p2) {
                     return (
-                      <td key={p2} className="px-1.5 py-2 text-center sm:px-2">
-                        <span className="inline-flex h-8 w-full items-center justify-center rounded-lg bg-secondary/40 px-1 text-[11px] text-muted-foreground sm:h-9 sm:text-xs">
+                      <td key={p2} className="px-1 py-1.5 text-center">
+                        <span className="inline-flex h-6 w-full min-w-7 items-center justify-center rounded-md bg-secondary/40 px-0.5 text-[9px] text-muted-foreground sm:h-7 sm:min-w-8 sm:text-[10px]">
                           —
                         </span>
                       </td>
@@ -567,8 +566,8 @@ function MatchupMatrix({
 
                   if (!matchup) {
                     return (
-                      <td key={p2} className="px-1.5 py-2 text-center sm:px-2">
-                        <span className="inline-flex h-8 w-full items-center justify-center rounded-lg bg-muted/40 px-1 text-[11px] text-muted-foreground sm:h-9 sm:text-xs">
+                      <td key={p2} className="px-1 py-1.5 text-center">
+                        <span className="inline-flex h-6 w-full min-w-7 items-center justify-center rounded-md bg-muted/40 px-0.5 text-[9px] text-muted-foreground sm:h-7 sm:min-w-8 sm:text-[10px]">
                           –
                         </span>
                       </td>
@@ -582,9 +581,9 @@ function MatchupMatrix({
                   const classes = getToneClasses(tone)
 
                   return (
-                    <td key={p2} className="px-1.5 py-2 text-center sm:px-2">
+                    <td key={p2} className="px-1 py-1.5 text-center">
                       <span
-                        className={`inline-flex h-8 w-full items-center justify-center rounded-lg border px-1 text-[11px] font-black tabular-nums sm:h-9 sm:text-xs ${classes.bg} ${classes.text} ${classes.border}`}
+                        className={`inline-flex h-6 w-full min-w-7 items-center justify-center rounded-md border px-0.5 text-[9px] font-bold tabular-nums leading-none sm:h-7 sm:min-w-8 sm:text-[10px] ${classes.bg} ${classes.text} ${classes.border}`}
                         title={`${p1} mot ${p2}: ${wins}–${losses}${
                           matchup.ties > 0 ? `, ${matchup.ties} oavgjorda` : ""
                         }`}
@@ -602,7 +601,8 @@ function MatchupMatrix({
 
       <p className="text-xs text-muted-foreground">
         Läs rader horisontellt. Grönt betyder plusrecord, rött betyder
-        minusrecord och grått betyder jämnt.
+        minusrecord och grått betyder jämnt. Håll över celler på desktop för
+        fullständig duell.
       </p>
     </div>
   )
@@ -618,7 +618,7 @@ function PlayerSelector({
   onSelect: (player: string) => void
 }) {
   return (
-    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+    <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
       {players.map((p) => {
         const selected = selectedPlayer === p
 
@@ -630,8 +630,8 @@ function PlayerSelector({
             title={p}
             className={
               selected
-                ? "min-w-0 rounded-xl border border-primary bg-primary/10 px-3 py-3 text-left text-sm font-bold text-primary transition-colors"
-                : "min-w-0 rounded-xl border border-border bg-secondary/40 px-3 py-3 text-left text-sm font-semibold text-foreground transition-colors hover:bg-secondary/70"
+                ? "min-w-0 rounded-xl border border-primary bg-primary/10 px-4 py-3 text-left text-sm font-bold text-primary transition-colors"
+                : "min-w-0 rounded-xl border border-border bg-secondary/40 px-4 py-3 text-left text-sm font-semibold text-foreground transition-colors hover:bg-secondary/70"
             }
           >
             <span className="block truncate">{p}</span>
@@ -851,10 +851,8 @@ function LoadingState() {
         ))}
       </section>
 
-      <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
-        <div className="h-96 animate-pulse rounded-2xl bg-muted" />
-        <div className="h-96 animate-pulse rounded-2xl bg-muted" />
-      </div>
+      <div className="h-96 animate-pulse rounded-2xl bg-muted" />
+      <div className="h-48 animate-pulse rounded-2xl bg-muted" />
     </div>
   )
 }
