@@ -15,7 +15,6 @@ import {
   AlertTriangle,
   BarChart3,
   CalendarDays,
-  Crown,
   Flag,
   Flame,
   MapPin,
@@ -94,6 +93,9 @@ function yearFromDate(dateStr: string) {
 
 function formatSigned(n: number | null | undefined, decimals = 1): string {
   if (n === null || n === undefined) return "–"
+
+  // Show "E" for even par (0)
+  if (n === 0) return "E"
 
   const val = parseFloat(Number(n).toFixed(decimals))
   return val > 0 ? `+${val}` : `${val}`
@@ -236,7 +238,12 @@ export default function BanorPage() {
 
     for (const r of filteredRows) {
       const comp = compLookup.get(r.tavling)
-      const courseKey = comp?.bana ?? `[Okänd] ${r.tavling}`
+      
+      // Skip rows that don't have a matching competition in filteredCompetitions
+      // (i.e., skip rows from major competitions)
+      if (!comp) continue
+
+      const courseKey = comp.bana ?? `[Okänd] ${r.tavling}`
 
       const arr = byCourse.get(courseKey) ?? []
       arr.push(r)
@@ -714,11 +721,6 @@ function CourseCard({ stats }: { stats: CourseStats }) {
             value={formatSigned(stats.samstaMotPar, 0)}
             icon={Skull}
             valueClass="text-destructive"
-          />
-          <MiniStat
-            label="Majors"
-            value={stats.antalMajors}
-            icon={Crown}
           />
         </div>
 
