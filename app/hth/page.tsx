@@ -15,7 +15,6 @@ import {
   AlertTriangle,
   BarChart3,
   Crown,
-  Medal,
   Scale,
   Shield,
   Sparkles,
@@ -280,15 +279,6 @@ export default function HeadToHeadPage() {
         ? [...matchups].sort((a, b) => b.games - a.games)[0]
         : null
 
-    const biggestDominance =
-      matchups.length > 0
-        ? [...matchups].sort((a, b) => {
-            const aDiff = Math.abs(a.p1Wins - a.p2Wins)
-            const bDiff = Math.abs(b.p1Wins - b.p2Wins)
-            return bDiff - aDiff
-          })[0]
-        : null
-
     return {
       filtered,
       playedRows,
@@ -303,7 +293,6 @@ export default function HeadToHeadPage() {
       bestRecord,
       worstRecord,
       mostPlayedMatchup,
-      biggestDominance,
       competitionsCount: byCompetition.size,
     }
   }, [lbRows, selectedYear, selectedPlayer])
@@ -316,7 +305,7 @@ export default function HeadToHeadPage() {
         <div className="absolute -bottom-24 left-1/4 h-56 w-56 rounded-full bg-secondary/70" />
 
         <div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-          <div>
+          <div className="min-w-0">
             <div className="mb-3 inline-flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-xs font-bold uppercase tracking-wide text-primary">
               <Sparkles className="h-3.5 w-3.5" />
               Rivalitet
@@ -408,9 +397,9 @@ export default function HeadToHeadPage() {
           <section className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-lg">
-                  <BarChart3 className="h-5 w-5 text-primary" />
-                  Matchup-matris
+                <CardTitle className="flex min-w-0 items-center gap-2 text-base sm:text-lg">
+                  <BarChart3 className="h-5 w-5 shrink-0 text-primary" />
+                  <span className="truncate">Matchup-matris</span>
                 </CardTitle>
               </CardHeader>
 
@@ -424,9 +413,9 @@ export default function HeadToHeadPage() {
 
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-lg">
-                  <UserRound className="h-5 w-5 text-primary" />
-                  Välj spelare
+                <CardTitle className="flex min-w-0 items-center gap-2 text-base sm:text-lg">
+                  <UserRound className="h-5 w-5 shrink-0 text-primary" />
+                  <span className="truncate">Välj spelare</span>
                 </CardTitle>
               </CardHeader>
 
@@ -491,22 +480,27 @@ function StatCard({
 }) {
   return (
     <Card>
-      <CardContent className="flex h-full flex-col justify-between gap-4 p-5">
-        <div className="flex items-center justify-between gap-3">
-          <div className="text-sm font-medium text-muted-foreground">
+      <CardContent className="flex h-full min-w-0 flex-col justify-between gap-4 p-5">
+        <div className="flex min-w-0 items-center justify-between gap-3">
+          <div className="min-w-0 truncate text-sm font-medium text-muted-foreground">
             {title}
           </div>
 
-          <div className="rounded-lg bg-primary/10 p-2 text-primary">
+          <div className="shrink-0 rounded-lg bg-primary/10 p-2 text-primary">
             <Icon className="h-4 w-4" />
           </div>
         </div>
 
-        <div>
-          <div className="text-2xl font-extrabold tracking-tight text-foreground">
+        <div className="min-w-0">
+          <div
+            className="truncate text-xl font-extrabold tracking-tight text-foreground sm:text-2xl"
+            title={typeof value === "string" ? value : undefined}
+          >
             {value}
           </div>
-          <div className="mt-1 text-sm text-muted-foreground">{sub}</div>
+          <div className="mt-1 truncate text-sm text-muted-foreground" title={sub}>
+            {sub}
+          </div>
         </div>
       </CardContent>
     </Card>
@@ -529,19 +523,20 @@ function MatchupMatrix({
   return (
     <div className="flex flex-col gap-3">
       <div className="overflow-x-auto rounded-2xl border border-border">
-        <table className="w-full min-w-[720px] text-sm">
+        <table className="w-full min-w-[640px] text-sm">
           <thead>
             <tr className="border-b border-border bg-secondary/40">
-              <th className="sticky left-0 z-10 bg-secondary px-3 py-3 text-left font-bold text-foreground">
+              <th className="sticky left-0 z-10 max-w-24 bg-secondary px-3 py-3 text-left text-xs font-bold text-foreground sm:max-w-32 sm:text-sm">
                 Spelare
               </th>
 
               {players.map((p) => (
                 <th
                   key={p}
-                  className="px-3 py-3 text-center text-xs font-bold text-muted-foreground"
+                  title={p}
+                  className="max-w-14 px-2 py-3 text-center text-[10px] font-bold text-muted-foreground sm:max-w-20 sm:text-xs"
                 >
-                  {p.slice(0, 4)}
+                  <span className="block truncate">{p}</span>
                 </th>
               ))}
             </tr>
@@ -550,15 +545,18 @@ function MatchupMatrix({
           <tbody>
             {players.map((p1) => (
               <tr key={p1} className="border-b border-border/60 last:border-0">
-                <td className="sticky left-0 z-10 bg-card px-3 py-3 font-bold text-foreground">
-                  {p1}
+                <td
+                  className="sticky left-0 z-10 max-w-24 bg-card px-3 py-3 text-xs font-bold text-foreground sm:max-w-32 sm:text-sm"
+                  title={p1}
+                >
+                  <span className="block truncate">{p1}</span>
                 </td>
 
                 {players.map((p2) => {
                   if (p1 === p2) {
                     return (
-                      <td key={p2} className="px-2 py-2 text-center">
-                        <span className="inline-flex h-9 w-full items-center justify-center rounded-lg bg-secondary/40 text-muted-foreground">
+                      <td key={p2} className="px-1.5 py-2 text-center sm:px-2">
+                        <span className="inline-flex h-8 w-full items-center justify-center rounded-lg bg-secondary/40 px-1 text-[11px] text-muted-foreground sm:h-9 sm:text-xs">
                           —
                         </span>
                       </td>
@@ -569,8 +567,8 @@ function MatchupMatrix({
 
                   if (!matchup) {
                     return (
-                      <td key={p2} className="px-2 py-2 text-center">
-                        <span className="inline-flex h-9 w-full items-center justify-center rounded-lg bg-muted/40 text-muted-foreground">
+                      <td key={p2} className="px-1.5 py-2 text-center sm:px-2">
+                        <span className="inline-flex h-8 w-full items-center justify-center rounded-lg bg-muted/40 px-1 text-[11px] text-muted-foreground sm:h-9 sm:text-xs">
                           –
                         </span>
                       </td>
@@ -584,9 +582,9 @@ function MatchupMatrix({
                   const classes = getToneClasses(tone)
 
                   return (
-                    <td key={p2} className="px-2 py-2 text-center">
+                    <td key={p2} className="px-1.5 py-2 text-center sm:px-2">
                       <span
-                        className={`inline-flex h-9 w-full items-center justify-center rounded-lg border text-xs font-black tabular-nums ${classes.bg} ${classes.text} ${classes.border}`}
+                        className={`inline-flex h-8 w-full items-center justify-center rounded-lg border px-1 text-[11px] font-black tabular-nums sm:h-9 sm:text-xs ${classes.bg} ${classes.text} ${classes.border}`}
                         title={`${p1} mot ${p2}: ${wins}–${losses}${
                           matchup.ties > 0 ? `, ${matchup.ties} oavgjorda` : ""
                         }`}
@@ -629,13 +627,14 @@ function PlayerSelector({
             key={p}
             type="button"
             onClick={() => onSelect(selected ? "" : p)}
+            title={p}
             className={
               selected
-                ? "rounded-xl border border-primary bg-primary/10 px-3 py-3 text-left font-bold text-primary transition-colors"
-                : "rounded-xl border border-border bg-secondary/40 px-3 py-3 text-left font-semibold text-foreground transition-colors hover:bg-secondary/70"
+                ? "min-w-0 rounded-xl border border-primary bg-primary/10 px-3 py-3 text-left text-sm font-bold text-primary transition-colors"
+                : "min-w-0 rounded-xl border border-border bg-secondary/40 px-3 py-3 text-left text-sm font-semibold text-foreground transition-colors hover:bg-secondary/70"
             }
           >
-            {p}
+            <span className="block truncate">{p}</span>
           </button>
         )
       })}
@@ -680,9 +679,11 @@ function SelectedPlayerSection({
     <section className="flex flex-col gap-4">
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-lg">
-            <Shield className="h-5 w-5 text-primary" />
-            {selectedPlayer} vs alla
+          <CardTitle className="flex min-w-0 items-center gap-2 text-base sm:text-lg">
+            <Shield className="h-5 w-5 shrink-0 text-primary" />
+            <span className="truncate" title={`${selectedPlayer} vs alla`}>
+              {selectedPlayer} vs alla
+            </span>
           </CardTitle>
         </CardHeader>
 
@@ -752,17 +753,22 @@ function MiniStat({
   icon: ComponentType<{ className?: string }>
 }) {
   return (
-    <div className="rounded-2xl border border-border bg-secondary/30 p-4">
-      <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-muted-foreground">
-        <Icon className="h-4 w-4 text-primary" />
-        {title}
+    <div className="min-w-0 rounded-2xl border border-border bg-secondary/30 p-4">
+      <div className="flex min-w-0 items-center gap-2 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+        <Icon className="h-4 w-4 shrink-0 text-primary" />
+        <span className="truncate">{title}</span>
       </div>
 
-      <div className="mt-2 text-2xl font-extrabold tracking-tight text-foreground">
+      <div
+        className="mt-2 truncate text-xl font-extrabold tracking-tight text-foreground sm:text-2xl"
+        title={typeof value === "string" ? value : undefined}
+      >
         {value}
       </div>
 
-      <div className="mt-1 text-sm text-muted-foreground">{sub}</div>
+      <div className="mt-1 truncate text-sm text-muted-foreground" title={sub}>
+        {sub}
+      </div>
     </div>
   )
 }
@@ -773,21 +779,24 @@ function PlayerMatchupCard({ matchup }: { matchup: PlayerMatchup }) {
 
   return (
     <div
-      className={`relative overflow-hidden rounded-2xl border p-4 shadow-sm ${classes.border} ${classes.bg}`}
+      className={`relative min-w-0 overflow-hidden rounded-2xl border p-4 shadow-sm ${classes.border} ${classes.bg}`}
     >
-      <div className="absolute right-3 top-3 text-5xl font-black leading-none text-muted-foreground/10">
+      <div className="absolute right-3 top-3 text-4xl font-black leading-none text-muted-foreground/10 sm:text-5xl">
         {matchup.diff > 0 ? "+" : ""}
         {matchup.diff}
       </div>
 
-      <div className="relative flex flex-col gap-4">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <div className="text-lg font-extrabold text-foreground">
+      <div className="relative flex min-w-0 flex-col gap-4">
+        <div className="flex min-w-0 items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <div
+              className="truncate text-base font-extrabold text-foreground sm:text-lg"
+              title={matchup.opponent}
+            >
               {matchup.opponent}
             </div>
 
-            <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+            <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2 text-sm text-muted-foreground">
               <span className="font-bold tabular-nums text-foreground">
                 {matchup.wins}–{matchup.losses}
               </span>
@@ -801,29 +810,29 @@ function PlayerMatchupCard({ matchup }: { matchup: PlayerMatchup }) {
           </div>
 
           <span
-            className={`rounded-full bg-background/80 px-2.5 py-1 text-xs font-bold ${classes.text}`}
+            className={`shrink-0 rounded-full bg-background/80 px-2.5 py-1 text-xs font-bold ${classes.text}`}
           >
             {getResultLabel(matchup.wins, matchup.losses)}
           </span>
         </div>
 
         <div className="grid grid-cols-2 gap-3">
-          <div className="rounded-xl bg-background/70 p-3">
-            <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-              <Trophy className="h-3.5 w-3.5 text-primary" />
-              Win rate
+          <div className="min-w-0 rounded-xl bg-background/70 p-3">
+            <div className="flex min-w-0 items-center gap-2 text-xs font-medium text-muted-foreground">
+              <Trophy className="h-3.5 w-3.5 shrink-0 text-primary" />
+              <span className="truncate">Win rate</span>
             </div>
-            <div className={`mt-1 text-xl font-black ${classes.text}`}>
+            <div className={`mt-1 text-lg font-black sm:text-xl ${classes.text}`}>
               {formatPct(matchup.winPct)}
             </div>
           </div>
 
-          <div className="rounded-xl bg-background/70 p-3">
-            <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-              <Scale className="h-3.5 w-3.5 text-primary" />
-              Möten
+          <div className="min-w-0 rounded-xl bg-background/70 p-3">
+            <div className="flex min-w-0 items-center gap-2 text-xs font-medium text-muted-foreground">
+              <Scale className="h-3.5 w-3.5 shrink-0 text-primary" />
+              <span className="truncate">Möten</span>
             </div>
-            <div className="mt-1 text-xl font-black text-foreground">
+            <div className="mt-1 text-lg font-black text-foreground sm:text-xl">
               {matchup.games}
             </div>
           </div>
