@@ -276,7 +276,7 @@ function competitionLabel(date: string, competitions: Competition[]) {
   return `${formatDateSv(date)} · ${comp.bana}`
 }
 
-// ─── Chart helpers ────────────────────────────────────────────────────────────
+// ─── Chart helpers ────────────────────────────────────────────────────────
 
 function LineEndLabel(props: {
   x?: number
@@ -393,6 +393,8 @@ export default function LeaderboardPage() {
   const [motParValues, setMotParValues] = useState<Record<string, string>>({})
   const [password, setPassword] = useState("")
   const [submitting, setSubmitting] = useState(false)
+
+  const [selectedCompetitionForResults, setSelectedCompetitionForResults] = useState<string>("")
 
   // ── Data fetching ──────────────────────────────────────────────────────────
 
@@ -829,6 +831,16 @@ export default function LeaderboardPage() {
     }
   }, [rows, competitions])
 
+  // Competition results - show selected or latest
+  const competitionResultsRows = useMemo(() => {
+    const targetDate = selectedCompetitionForResults || latestDate
+    if (!targetDate) return []
+    
+    return rows
+      .filter((r) => r.tavling === targetDate && Number(r.placering) > 0)
+      .sort((a, b) => Number(a.placering) - Number(b.placering))
+  }, [rows, selectedCompetitionForResults, latestDate])
+
   const loading = loadingMeta || loadingLB || loadingCompetitions || loadingPlayers
 
   // ── Submit ─────────────────────────────────────────────────────────────────
@@ -1134,6 +1146,87 @@ export default function LeaderboardPage() {
             </CardContent>
           </Card>
 
+          {/* Competition Results */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Medal className="h-5 w-5 text-primary" />
+                Resultat från deltävling
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="result-competition-select">Välj deltävling</Label>
+                <Select 
+                  value={selectedCompetitionForResults} 
+                  onValueChange={setSelectedCompetitionForResults}
+                >
+                  <SelectTrigger id="result-competition-select">
+                    <SelectValue placeholder="Välj en deltävling" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {dates
+                      .slice()
+                      .reverse()
+                      .map((date) => {
+                        const comp = competitions.find((c) => c.datum === date)
+                        return (
+                          <SelectItem key={date} value={date}>
+                            {competitionLabel(date, competitions)}
+                            {comp && isMajor(comp.major) ? " · Major" : ""}
+                          </SelectItem>
+                        )
+                      })}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {competitionResultsRows.length > 0 && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
+                        <th className="pb-3 pr-3">#</th>
+                        <th className="pb-3 pr-3">Spelare</th>
+                        <th className="pb-3 pr-3 text-right">Poäng</th>
+                        <th className="pb-3 pr-3 text-right">Mot par</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {competitionResultsRows.map((r) => (
+                        <tr
+                          key={`${r.tavling}-${r.spelare}`}
+                          className="border-b border-border/60 last:border-0"
+                        >
+                          <td className="py-3 pr-3">
+                            <RankBadge rank={Number(r.placering)} />
+                          </td>
+                          <td className="py-3 pr-3 font-semibold text-foreground">
+                            {r.spelare}
+                          </td>
+                          <td className="py-3 pr-3 text-right font-bold text-foreground">
+                            {r.poang}
+                          </td>
+                          <td className="py-3 pr-3 text-right tabular-nums">
+                            {r.motPar !== null && r.motPar !== undefined
+                              ? formatSigned(r.motPar, 0)
+                              : "–"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {competitionResultsRows.length === 0 && (
+                <p className="text-sm text-muted-foreground text-center py-4">
+                  Ingen data för denna tävling.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
           {/* Par chart */}
           <Card>
             <CardHeader>
@@ -1333,81 +1426,39 @@ export default function LeaderboardPage() {
                     <div className="space-y-2">
                       <Label>Placering</Label>
                       <Input
-  type="text"
-  inputMode="decimal"
-  value={motParValues[p.spelarnamn] ?? "0"}
-  onFocus={(e) => e.currentTarget.select()}
-  onChange={(e) => {
-    const value = e.target.value
-
-    // Tillåt tomt, minus, plus och siffror.
-    // Exempel: "", "-", "+", "-2", "+3", "0"
-    if (/^[+-]?\d*$/.test(value)) {
-      setMotParValues((prev) => ({
-        ...prev,
-        [p.spelarnamn]: value,
-      }))
-    }
-  }}
-/>
+                        type="number"
+                        min={0}
+                        step={1}
+                        value={placeringar[p.spelarnamn] ?? 0}
+                        onFocus={(e) => e.currentTarget.select()}
+                        onChange={(e) =>
+                          setPlaceringar((prev) => ({
+                            ...prev,
+                            [p.spelarnamn]: Number(e.target.value),
+                          }))
+                        }
+                      />
                     </div>
 
                     <div className="space-y-2">
-  <Label>Mot par</Label>
+                      <Label>Mot par</Label>
+                      <Input
+                        type="number"
+                        step={1}
+                        value={motParValues[p.spelarnamn] ?? "0"}
+                        onFocus={(e) => e.currentTarget.select()}
+                        onChange={(e) => {
+                          const value = e.target.value
 
-  <div className="grid grid-cols-[auto_1fr_auto] gap-2">
-    <Button
-      type="button"
-      variant="secondary"
-      onClick={() =>
-        setMotParValues((prev) => {
-          const current = parseMotPar(prev[p.spelarnamn] ?? "0")
-
-          return {
-            ...prev,
-            [p.spelarnamn]: String(current - 1),
-          }
-        })
-      }
-    >
-      −
-    </Button>
-
-    <Input
-      type="text"
-      inputMode="decimal"
-      value={motParValues[p.spelarnamn] ?? "0"}
-      onFocus={(e) => e.currentTarget.select()}
-      onChange={(e) => {
-        const value = e.target.value
-
-        if (/^[+-]?\d*$/.test(value)) {
-          setMotParValues((prev) => ({
-            ...prev,
-            [p.spelarnamn]: value,
-          }))
-        }
-      }}
-    />
-
-    <Button
-      type="button"
-      variant="secondary"
-      onClick={() =>
-        setMotParValues((prev) => {
-          const current = parseMotPar(prev[p.spelarnamn] ?? "0")
-
-          return {
-            ...prev,
-            [p.spelarnamn]: String(current + 1),
-          }
-        })
-      }
-    >
-      +
-    </Button>
-  </div>
-</div>
+                          if (/^[+-]?\d*$/.test(value)) {
+                            setMotParValues((prev) => ({
+                              ...prev,
+                              [p.spelarnamn]: value,
+                            }))
+                          }
+                        }}
+                      />
+                    </div>
                   </div>
                 </div>
               ))}
