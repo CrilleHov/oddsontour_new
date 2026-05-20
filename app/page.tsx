@@ -24,6 +24,7 @@ import {
   AlertTriangle,
   Loader2,
   Swords,
+  BarChart3,
 } from "lucide-react"
 
 const SEASON_YEAR = 2026
@@ -106,10 +107,8 @@ function formatDate(value: string | null | undefined) {
 function daysBetween(from: Date, to: Date) {
   const start = new Date(from)
   start.setHours(0, 0, 0, 0)
-
   const end = new Date(to)
   end.setHours(0, 0, 0, 0)
-
   return Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24))
 }
 
@@ -191,7 +190,6 @@ export default function HomePage() {
       if (cancelled) return
 
       const nextErrors: string[] = []
-
       if (leaderboardRes.error) nextErrors.push(`Leaderboard: ${leaderboardRes.error.message}`)
       if (competitionsRes.error) nextErrors.push(`Spelschema: ${competitionsRes.error.message}`)
       if (finesRes.error) nextErrors.push(`Böter: ${finesRes.error.message}`)
@@ -210,10 +208,7 @@ export default function HomePage() {
     }
 
     loadDashboard()
-
-    return () => {
-      cancelled = true
-    }
+    return () => { cancelled = true }
   }, [supabase])
 
   const dashboard = useMemo(() => {
@@ -244,6 +239,10 @@ export default function HomePage() {
 
     const latestCompetitionDate = playedDates.at(-1) ?? null
 
+    const latestCompetition = latestCompetitionDate
+      ? competitions.find((c) => c.datum === latestCompetitionDate) ?? null
+      : null
+
     const latestRows = latestCompetitionDate
       ? rowsThisSeason
           .filter((r) => r.tavling === latestCompetitionDate)
@@ -253,7 +252,6 @@ export default function HomePage() {
     const latestWinner = latestRows.find((r) => Number(r.placering) === 1) ?? null
 
     const byPlayer = new Map<string, StandingRow>()
-
     for (const r of rowsThisSeason) {
       const current = byPlayer.get(r.spelare) ?? {
         spelare: r.spelare,
@@ -262,18 +260,12 @@ export default function HomePage() {
         vinster: 0,
         senastePlacering: null,
       }
-
       current.poang += Number(r.poang ?? 0)
       current.tavlingar += 1
-
-      if (Number(r.placering) === 1) {
-        current.vinster += 1
-      }
-
+      if (Number(r.placering) === 1) current.vinster += 1
       if (latestCompetitionDate && r.tavling === latestCompetitionDate) {
         current.senastePlacering = r.placering ?? null
       }
-
       byPlayer.set(r.spelare, current)
     }
 
@@ -289,14 +281,24 @@ export default function HomePage() {
       competitionsThisSeason.find((c) => {
         const d = toDate(c.datum)
         if (!d) return false
-
         const hasBeenPlayed = playedDates.includes(c.datum)
         return d >= new Date(today.getFullYear(), today.getMonth(), today.getDate()) && !hasBeenPlayed
       }) ?? null
 
     const finalCompetition = competitionsThisSeason.at(-1) ?? null
+    const firstCompetition = competitionsThisSeason.at(0) ?? null
     const finalDate = toDate(finalCompetition?.datum)
+    const firstDate = toDate(firstCompetition?.datum)
     const daysToFinal = finalDate ? daysBetween(today, finalDate) : null
+
+    // Season progress: how far through from first to final
+    const seasonProgress = (() => {
+      if (!firstDate || !finalDate) return null
+      const total = daysBetween(firstDate, finalDate)
+      if (total <= 0) return 100
+      const elapsed = daysBetween(firstDate, today)
+      return Math.min(100, Math.max(0, Math.round((elapsed / total) * 100)))
+    })()
 
     const latestFineTotal = fineTotals
       .filter((r) => isDateInSeason(r.datum, SEASON_YEAR))
@@ -319,7 +321,6 @@ export default function HomePage() {
     const totalFines = Number(latestFineTotal?.tot ?? calculatedFineTotal)
 
     const finesByPlayer = new Map<string, number>()
-
     for (const f of finesThisSeason) {
       if (!f.spelare) continue
       finesByPlayer.set(f.spelare, (finesByPlayer.get(f.spelare) ?? 0) + Number(f.botesbelopp ?? 0))
@@ -342,11 +343,13 @@ export default function HomePage() {
       competitionsThisSeason,
       playedDates,
       latestCompetitionDate,
+      latestCompetition,
       latestRows,
       latestWinner,
       nextCompetition,
       finalCompetition,
       daysToFinal,
+      seasonProgress,
       totalFines,
       mostFined,
       reigningChampion,
@@ -420,6 +423,7 @@ export default function HomePage() {
           </CardContent>
         </Card>
 
+        {/* FIX 2: Medal badges for top 3 in MiniLeaderboard */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-lg">
@@ -489,7 +493,8 @@ export default function HomePage() {
           href="/boter"
         />
 
-        <StatCard
+        {/* FIX 4: Season progress bar in "Till finalen" card */}
+        <StatCardWithProgress
           loading={loading}
           title="Till finalen"
           value={
@@ -506,6 +511,7 @@ export default function HomePage() {
           }
           icon={Timer}
           href="/countdown"
+          progress={dashboard.seasonProgress}
         />
 
         <StatCard
@@ -563,9 +569,11 @@ export default function HomePage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
+            {/* FIX 3: Show course name as heading + major badge */}
             <LatestCompetition
               loading={loading}
               date={dashboard.latestCompetitionDate}
+              competition={dashboard.latestCompetition}
               rows={dashboard.latestRows}
             />
           </CardContent>
@@ -584,14 +592,14 @@ export default function HomePage() {
         </Card>
       </section>
 
-      {/* Quick links */}
+      {/* FIX 1: Quick links — 3-column grid to avoid orphan, added Banstatistik */}
       <section>
         <div className="mb-3 flex items-center justify-between gap-3">
           <h2 className="text-lg font-semibold text-foreground">Gå vidare</h2>
           <span className="text-sm text-muted-foreground">Alla tourens sidor</span>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <QuickLink href="/leaderboard" icon={Trophy} title="Leaderboard" desc="Poängställning och utveckling" />
           <QuickLink href="/spelschema" icon={CalendarDays} title="Spelschema" desc="Deltävlingar per år" />
           <QuickLink href="/boter" icon={Banknote} title="Böteskassa" desc="Böter, total och per spelare" />
@@ -606,6 +614,8 @@ export default function HomePage() {
     </div>
   )
 }
+
+// ─── Components ───────────────────────────────────────────────────────────────
 
 function StatCard({
   title,
@@ -652,6 +662,72 @@ function StatCard({
   )
 }
 
+// FIX 4: StatCard variant with progress bar
+function StatCardWithProgress({
+  title,
+  value,
+  sub,
+  icon: Icon,
+  href,
+  loading,
+  progress,
+}: {
+  title: string
+  value: ReactNode
+  sub: string
+  icon: ComponentType<{ className?: string }>
+  href: string
+  loading: boolean
+  progress: number | null
+}) {
+  return (
+    <Link href={href} className="group">
+      <Card className="h-full transition-colors group-hover:bg-secondary/40">
+        <CardContent className="flex h-full flex-col justify-between gap-4 p-5">
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-sm font-medium text-muted-foreground">{title}</div>
+            <div className="rounded-lg bg-primary/10 p-2 text-primary">
+              <Icon className="h-4 w-4" />
+            </div>
+          </div>
+
+          {loading ? (
+            <div className="space-y-2">
+              <div className="h-7 w-28 animate-pulse rounded bg-muted" />
+              <div className="h-4 w-40 animate-pulse rounded bg-muted" />
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              <div>
+                <div className="text-2xl font-extrabold tracking-tight text-foreground">
+                  {value}
+                </div>
+                <div className="mt-1 text-sm text-muted-foreground">{sub}</div>
+              </div>
+
+              {progress !== null && (
+                <div className="flex flex-col gap-1">
+                  <div className="flex justify-between text-xs text-muted-foreground">
+                    <span>Säsongsstart</span>
+                    <span>{progress}%</span>
+                  </div>
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-secondary">
+                    <div
+                      className="h-full rounded-full bg-primary transition-all"
+                      style={{ width: `${progress}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </Link>
+  )
+}
+
+// FIX 2: Medal badges for top 3
 function MiniLeaderboard({
   loading,
   standings,
@@ -677,16 +753,31 @@ function MiniLeaderboard({
     )
   }
 
+  const medals = ["🥇", "🥈", "🥉"]
+  const medalBg = [
+    "bg-yellow-500/10 ring-1 ring-yellow-500/30",
+    "bg-slate-400/10 ring-1 ring-slate-400/30",
+    "bg-amber-700/10 ring-1 ring-amber-700/30",
+  ]
+
   return (
     <div className="flex flex-col gap-2">
       {standings.slice(0, 5).map((row, index) => (
         <div
           key={row.spelare}
-          className="flex items-center justify-between rounded-lg bg-secondary/40 px-3 py-2"
+          className={`flex items-center justify-between rounded-lg px-3 py-2 ${
+            index < 3 ? medalBg[index] : "bg-secondary/40"
+          }`}
         >
           <div className="flex items-center gap-3">
-            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-background text-sm font-bold text-foreground">
-              {index + 1}
+            <div className="flex h-7 w-7 items-center justify-center text-lg">
+              {index < 3 ? (
+                <span>{medals[index]}</span>
+              ) : (
+                <span className="rounded-full bg-background text-sm font-bold text-foreground flex h-7 w-7 items-center justify-center">
+                  {index + 1}
+                </span>
+              )}
             </div>
             <div>
               <div className="font-semibold text-foreground">{row.spelare}</div>
@@ -708,13 +799,16 @@ function MiniLeaderboard({
   )
 }
 
+// FIX 3: Show course name + major badge in LatestCompetition
 function LatestCompetition({
   loading,
   date,
+  competition,
   rows,
 }: {
   loading: boolean
   date: string | null
+  competition: CompetitionRow | null
   rows: LBRow[]
 }) {
   if (loading) {
@@ -737,8 +831,20 @@ function LatestCompetition({
   return (
     <div className="flex flex-col gap-3">
       <div>
-        <div className="text-sm text-muted-foreground">Senast spelad</div>
-        <div className="text-xl font-bold text-foreground">{formatDate(date)}</div>
+        <div className="flex items-center gap-2">
+          <div className="text-xl font-bold text-foreground">
+            {competition?.bana ?? formatDate(date)}
+          </div>
+          {competition && isMajor(competition.major) && (
+            <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
+              Major
+            </span>
+          )}
+        </div>
+        <div className="mt-0.5 text-sm text-muted-foreground">
+          {formatDate(date)}
+          {competition?.plats ? ` · ${competition.plats}` : ""}
+        </div>
       </div>
 
       <div className="flex flex-col gap-2">
@@ -756,7 +862,9 @@ function LatestCompetition({
 
             <div className="text-sm text-muted-foreground">
               {r.poang ?? 0} p
-              {r.motPar !== null && r.motPar !== undefined ? ` · ${r.motPar > 0 ? "+" : ""}${r.motPar}` : ""}
+              {r.motPar !== null && r.motPar !== undefined
+                ? ` · ${r.motPar > 0 ? "+" : ""}${r.motPar}`
+                : ""}
             </div>
           </div>
         ))}
@@ -863,7 +971,6 @@ function QuickLink({
           <div className="mt-0.5 rounded-lg bg-primary/10 p-2 text-primary">
             <Icon className="h-5 w-5" />
           </div>
-
           <div>
             <div className="font-semibold text-foreground">{title}</div>
             <div className="text-sm text-muted-foreground">{desc}</div>
