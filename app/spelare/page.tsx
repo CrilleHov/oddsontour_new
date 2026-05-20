@@ -20,6 +20,8 @@ import {
   Trophy,
   UserRound,
   Users,
+  Swords,
+  Rabbit,
 } from "lucide-react"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -56,6 +58,9 @@ type PlayerStats = {
   latestMotPar: number | null
   latestDate: string | null
   formPlacements: Array<number | null>
+  streak: { type: "win" | "top3" | "last" | null; count: number }
+  nemesis: { spelare: string; wins: number; losses: number } | null
+  offer: { spelare: string; wins: number; losses: number } | null
 }
 
 type PlayerWithStats = {
@@ -81,18 +86,14 @@ function displayName(p: PlayerRow) {
 
 function formatSigned(n: number | null | undefined, decimals = 1): string {
   if (n === null || n === undefined) return "–"
-
   const val = parseFloat(Number(n).toFixed(decimals))
   return val > 0 ? `+${val}` : `${val}`
 }
 
 function formatDate(dateStr: string | null | undefined) {
   if (!dateStr) return "–"
-
   const date = new Date(`${dateStr.slice(0, 10)}T00:00:00`)
-
   if (Number.isNaN(date.getTime())) return dateStr
-
   return new Intl.DateTimeFormat("sv-SE", {
     day: "numeric",
     month: "short",
@@ -100,26 +101,123 @@ function formatDate(dateStr: string | null | undefined) {
   }).format(date)
 }
 
-function calcStats(rows: LBRow[]): PlayerStats {
+// Build head-to-head map: for each pair, how many times did each win?
+function buildH2H(lbRows: LBRow[]): Map<string, Map<string, { wins: number; losses: number }>> {
+  // Group by competition
+  const byComp = new Map<string, LBRow[]>()
+  for (const r of lbRows) {
+    if (Number(r.placering) <= 0) continue
+    const arr = byComp.get(r.tavling) ?? []
+    arr.push(r)
+    byComp.set(r.tavling, arr)
+  }
+
+  // result[p1][p2] = { wins: p1 beat p2, losses: p2 beat p1 }
+  const result = new Map<string, Map<string, { wins: number; losses: number }>>()
+
+  for (const comp of byComp.values()) {
+    for (let i = 0; i < comp.length; i++) {
+      for (let j = i + 1; j < comp.length; j++) {
+        const a = comp[i]
+        const b = comp[j]
+
+        // Lower placering = better
+        const aWon = Number(a.placering) < Number(b.placering)
+        const bWon = Number(b.placering) < Number(a.placering)
+
+        if (!aWon && !bWon) continue // tie, skip
+
+        const updateFor = (p1: string, p2: string, won: boolean) => {
+          if (!result.has(p1)) result.set(p1, new Map())
+          const inner = result.get(p1)!
+          const cur = inner.get(p2) ?? { wins: 0, losses: 0 }
+          if (won) cur.wins += 1
+          else cur.losses += 1
+          inner.set(p2, cur)
+        }
+
+        updateFor(a.spelare, b.spelare, aWon)
+        updateFor(b.spelare, a.spelare, bWon)
+      }
+    }
+  }
+
+  return result
+}
+
+function calcStreak(rows: LBRow[]): { type: "win" | "top3" | "last" | null; count: number } {
   const played = rows
     .filter((r) => Number(r.placering) > 0)
     .sort((a, b) => a.tavling.localeCompare(b.tavling))
 
-  const withPar = played.filter(
-    (r) => r.motPar !== null && r.motPar !== undefined
-  )
+  if (played.length === 0) return { type: null, count: 0 }
 
+  const last = played[played.length - 1]
+
+  // Check win streak
+  let winStreak = 0
+  for (let i = played.length - 1; i >= 0; i--) {
+    if (Number(played[i].placering) === 1) winStreak++
+    else break
+  }
+  if (winStreak >= 2) return { type: "win", count: winStreak }
+
+  // Check top3 streak
+  let top3Streak = 0
+  for (let i = played.length - 1; i >= 0; i--) {
+    if (Number(played[i].placering) <= 3) top3Streak++
+    else break
+  }
+  if (top3Streak >= 2) return { type: "top3", count: top3Streak }
+
+  // Check last-place streak
+  let lastStreak = 0
+  for (let i = played.length - 1; i >= 0; i--) {
+    if (Number(played[i].placering) === Number(played[i].antal_spelare)) lastStreak++
+    else break
+  }
+  if (lastStreak >= 2) return { type: "last", count: lastStreak }
+
+  return { type: null, count: 0 }
+}
+
+function calcStats(
+  rows: LBRow[],
+  h2h: Map<string, { wins: number; losses: number }>
+): PlayerStats {
+  const played = rows
+    .filter((r) => Number(r.placering) > 0)
+    .sort((a, b) => a.tavling.localeCompare(b.tavling))
+
+  const withPar = played.filter((r) => r.motPar !== null && r.motPar !== undefined)
   const latestRow = played.at(-1) ?? null
   const latest3Dates = Array.from(new Set(played.map((r) => r.tavling))).slice(-3)
-
   const rowByDate = new Map<string, LBRow>()
-
-  for (const r of played) {
-    rowByDate.set(r.tavling, r)
-  }
+  for (const r of played) rowByDate.set(r.tavling, r)
 
   const antalVinster = played.filter((r) => Number(r.placering) === 1).length
   const antalTavlingar = played.length
+
+  // Nemesis: person I lose to most (min 2 encounters)
+  const h2hEntries = Array.from(h2h.entries())
+    .filter(([, v]) => v.wins + v.losses >= 2)
+
+  const nemesis = h2hEntries
+    .filter(([, v]) => v.losses > v.wins)
+    .sort((a, b) => {
+      const aDiff = a[1].losses - a[1].wins
+      const bDiff = b[1].losses - b[1].wins
+      return bDiff - aDiff
+    })[0]
+
+  // Offer: person I beat most (min 2 encounters)
+  const offer = h2hEntries
+    .filter(([, v]) => v.wins > v.losses)
+    .sort((a, b) => {
+      const aDiff = a[1].wins - a[1].losses
+      const bDiff = b[1].wins - b[1].losses
+      return bDiff - aDiff
+    })[0]
 
   return {
     totalPoang: played.reduce((s, r) => s + Number(r.poang ?? 0), 0),
@@ -137,13 +235,9 @@ function calcStats(rows: LBRow[]): PlayerStats {
         ? played.reduce((s, r) => s + Number(r.poang ?? 0), 0) / antalTavlingar
         : null,
     bastaMotPar:
-      withPar.length > 0
-        ? Math.min(...withPar.map((r) => Number(r.motPar ?? 0)))
-        : null,
+      withPar.length > 0 ? Math.min(...withPar.map((r) => Number(r.motPar ?? 0))) : null,
     samstaMotPar:
-      withPar.length > 0
-        ? Math.max(...withPar.map((r) => Number(r.motPar ?? 0)))
-        : null,
+      withPar.length > 0 ? Math.max(...withPar.map((r) => Number(r.motPar ?? 0))) : null,
     winRate:
       antalTavlingar > 0 ? Math.round((antalVinster / antalTavlingar) * 100) : null,
     latestPlacement: latestRow ? Number(latestRow.placering) : null,
@@ -151,6 +245,13 @@ function calcStats(rows: LBRow[]): PlayerStats {
     latestMotPar: latestRow ? latestRow.motPar : null,
     latestDate: latestRow?.tavling ?? null,
     formPlacements: latest3Dates.map((date) => rowByDate.get(date)?.placering ?? null),
+    streak: calcStreak(rows),
+    nemesis: nemesis
+      ? { spelare: nemesis[0], wins: nemesis[1].wins, losses: nemesis[1].losses }
+      : null,
+    offer: offer
+      ? { spelare: offer[0], wins: offer[1].wins, losses: offer[1].losses }
+      : null,
   }
 }
 
@@ -198,17 +299,8 @@ export default function SpelarePage() {
 
       if (cancelled) return
 
-      if (playerErr) {
-        setError(playerErr.message)
-        setLoading(false)
-        return
-      }
-
-      if (lbErr) {
-        setError(lbErr.message)
-        setLoading(false)
-        return
-      }
+      if (playerErr) { setError(playerErr.message); setLoading(false); return }
+      if (lbErr) { setError(lbErr.message); setLoading(false); return }
 
       setPlayers((playerData ?? []) as PlayerRow[])
       setLbRows((lbData ?? []) as LBRow[])
@@ -216,43 +308,39 @@ export default function SpelarePage() {
     }
 
     load()
-
-    return () => {
-      cancelled = true
-    }
+    return () => { cancelled = true }
   }, [supabase])
 
   const dashboard = useMemo(() => {
     const rowsByPlayer = new Map<string, LBRow[]>()
-
     for (const r of lbRows) {
       const arr = rowsByPlayer.get(r.spelare) ?? []
       arr.push(r)
       rowsByPlayer.set(r.spelare, arr)
     }
 
-    const statsByPlayer = new Map<string, PlayerStats>()
+    // Build global H2H map
+    const globalH2H = buildH2H(lbRows)
 
+    const statsByPlayer = new Map<string, PlayerStats>()
     for (const p of players) {
-      statsByPlayer.set(p.spelarnamn, calcStats(rowsByPlayer.get(p.spelarnamn) ?? []))
+      const h2h = globalH2H.get(p.spelarnamn) ?? new Map()
+      statsByPlayer.set(
+        p.spelarnamn,
+        calcStats(rowsByPlayer.get(p.spelarnamn) ?? [], h2h)
+      )
     }
 
     const activePlayers = players
       .filter((p) => isActive(p.aktiv))
       .map((p) => ({
         player: p,
-        stats: statsByPlayer.get(p.spelarnamn) ?? calcStats([]),
+        stats: statsByPlayer.get(p.spelarnamn) ?? calcStats([], new Map()),
         rank: 0,
       }))
       .sort((a, b) => {
-        if (b.stats.totalPoang !== a.stats.totalPoang) {
-          return b.stats.totalPoang - a.stats.totalPoang
-        }
-
-        if (b.stats.antalVinster !== a.stats.antalVinster) {
-          return b.stats.antalVinster - a.stats.antalVinster
-        }
-
+        if (b.stats.totalPoang !== a.stats.totalPoang) return b.stats.totalPoang - a.stats.totalPoang
+        if (b.stats.antalVinster !== a.stats.antalVinster) return b.stats.antalVinster - a.stats.antalVinster
         return displayName(a.player).localeCompare(displayName(b.player), "sv")
       })
       .map((row, idx) => ({ ...row, rank: idx + 1 }))
@@ -261,7 +349,7 @@ export default function SpelarePage() {
       .filter((p) => !isActive(p.aktiv))
       .map((p) => ({
         player: p,
-        stats: statsByPlayer.get(p.spelarnamn) ?? calcStats([]),
+        stats: statsByPlayer.get(p.spelarnamn) ?? calcStats([], new Map()),
         rank: 0,
       }))
       .sort((a, b) => displayName(a.player).localeCompare(displayName(b.player), "sv"))
@@ -269,24 +357,14 @@ export default function SpelarePage() {
     const allPlayerStats = [...activePlayers, ...retiredPlayers]
 
     const allTimeLeader = activePlayers[0] ?? null
-
-    const mostWins =
-      allPlayerStats
-        .filter((p) => p.stats.antalVinster > 0)
-        .sort((a, b) => b.stats.antalVinster - a.stats.antalVinster)[0] ?? null
-
-    const bestAvgPar =
-      allPlayerStats
-        .filter((p) => p.stats.snittMotPar !== null && p.stats.antalTavlingar >= 3)
-        .sort((a, b) => Number(a.stats.snittMotPar) - Number(b.stats.snittMotPar))[0] ??
-      null
-
-    const mostPlayed =
-      allPlayerStats
-        .filter((p) => p.stats.antalTavlingar > 0)
-        .sort((a, b) => b.stats.antalTavlingar - a.stats.antalTavlingar)[0] ??
-      null
-
+    const mostWins = allPlayerStats.filter((p) => p.stats.antalVinster > 0)
+      .sort((a, b) => b.stats.antalVinster - a.stats.antalVinster)[0] ?? null
+    const bestAvgPar = allPlayerStats
+      .filter((p) => p.stats.snittMotPar !== null && p.stats.antalTavlingar >= 3)
+      .sort((a, b) => Number(a.stats.snittMotPar) - Number(b.stats.snittMotPar))[0] ?? null
+    const mostPlayed = allPlayerStats
+      .filter((p) => p.stats.antalTavlingar > 0)
+      .sort((a, b) => b.stats.antalTavlingar - a.stats.antalTavlingar)[0] ?? null
     const totalCompetitions = new Set(
       lbRows.filter((r) => Number(r.placering) > 0).map((r) => r.tavling)
     ).size
@@ -294,6 +372,7 @@ export default function SpelarePage() {
     return {
       activePlayers,
       retiredPlayers,
+      allPlayerStats,
       allTimeLeader,
       mostWins,
       bestAvgPar,
@@ -304,6 +383,7 @@ export default function SpelarePage() {
 
   return (
     <div className="flex flex-col gap-6">
+      {/* Hero */}
       <section className="relative overflow-hidden rounded-3xl border border-border bg-card p-6 shadow-sm sm:p-8">
         <div className="absolute -right-20 -top-20 h-56 w-56 rounded-full bg-primary/10" />
         <div className="absolute -bottom-24 left-1/4 h-56 w-56 rounded-full bg-secondary/70" />
@@ -313,11 +393,9 @@ export default function SpelarePage() {
             <Sparkles className="h-3.5 w-3.5" />
             Player profiles
           </div>
-
           <h1 className="text-3xl font-extrabold tracking-tight text-foreground sm:text-4xl">
             Spelare
           </h1>
-
           <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground sm:text-base">
             Spelarprofiler, all-time-statistik, form, vinster och snitt mot par.
             Aktiva spelare sorteras efter totala poäng.
@@ -341,6 +419,7 @@ export default function SpelarePage() {
         <EmptyState />
       ) : (
         <>
+          {/* Stat cards */}
           <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <StatCard
               title="Aktiva spelare"
@@ -348,7 +427,6 @@ export default function SpelarePage() {
               sub={`${players.length} spelare totalt`}
               icon={Users}
             />
-
             <StatCard
               title="All-time ledare"
               value={dashboard.allTimeLeader?.player.spelarnamn ?? "Saknas"}
@@ -359,7 +437,6 @@ export default function SpelarePage() {
               }
               icon={Crown}
             />
-
             <StatCard
               title="Flest vinster"
               value={dashboard.mostWins?.player.spelarnamn ?? "Saknas"}
@@ -370,7 +447,6 @@ export default function SpelarePage() {
               }
               icon={Trophy}
             />
-
             <StatCard
               title="Bäst snitt mot par"
               value={dashboard.bestAvgPar?.player.spelarnamn ?? "Saknas"}
@@ -383,6 +459,7 @@ export default function SpelarePage() {
             />
           </section>
 
+          {/* Top 5 + overview */}
           <section className="grid gap-4 lg:grid-cols-[1fr_0.9fr]">
             <Card>
               <CardHeader>
@@ -391,7 +468,6 @@ export default function SpelarePage() {
                   Topp 5 all-time
                 </CardTitle>
               </CardHeader>
-
               <CardContent>
                 <TopFive players={dashboard.activePlayers} />
               </CardContent>
@@ -404,7 +480,6 @@ export default function SpelarePage() {
                   Snabböversikt
                 </CardTitle>
               </CardHeader>
-
               <CardContent>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <InfoBox
@@ -412,7 +487,6 @@ export default function SpelarePage() {
                     value={dashboard.totalCompetitions}
                     icon={CalendarDays}
                   />
-
                   <InfoBox
                     label="Flest starter"
                     value={
@@ -422,35 +496,16 @@ export default function SpelarePage() {
                     }
                     icon={Target}
                   />
-
                   <InfoBox
                     label="Högst vinstprocent"
-                    value={
-                      dashboard.activePlayers
+                    value={(() => {
+                      const top = dashboard.activePlayers
                         .filter((p) => p.stats.antalTavlingar >= 3 && p.stats.winRate !== null)
                         .sort((a, b) => Number(b.stats.winRate) - Number(a.stats.winRate))[0]
-                        ? `${
-                            dashboard.activePlayers
-                              .filter(
-                                (p) => p.stats.antalTavlingar >= 3 && p.stats.winRate !== null
-                              )
-                              .sort(
-                                (a, b) => Number(b.stats.winRate) - Number(a.stats.winRate)
-                              )[0].player.spelarnamn
-                          } · ${
-                            dashboard.activePlayers
-                              .filter(
-                                (p) => p.stats.antalTavlingar >= 3 && p.stats.winRate !== null
-                              )
-                              .sort(
-                                (a, b) => Number(b.stats.winRate) - Number(a.stats.winRate)
-                              )[0].stats.winRate
-                          }%`
-                        : "–"
-                    }
+                      return top ? `${top.player.spelarnamn} · ${top.stats.winRate}%` : "–"
+                    })()}
                     icon={Flame}
                   />
-
                   <InfoBox
                     label="Pensionerade"
                     value={`${dashboard.retiredPlayers.length} st`}
@@ -461,6 +516,7 @@ export default function SpelarePage() {
             </Card>
           </section>
 
+          {/* Player cards */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-lg">
@@ -468,12 +524,9 @@ export default function SpelarePage() {
                 Aktiva spelare
               </CardTitle>
             </CardHeader>
-
             <CardContent>
               {dashboard.activePlayers.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  Inga aktiva spelare hittades.
-                </p>
+                <p className="text-sm text-muted-foreground">Inga aktiva spelare hittades.</p>
               ) : (
                 <div className="grid gap-4 lg:grid-cols-2">
                   {dashboard.activePlayers.map((row) => (
@@ -484,6 +537,7 @@ export default function SpelarePage() {
             </CardContent>
           </Card>
 
+          {/* Retired */}
           {dashboard.retiredPlayers.length > 0 && (
             <Card>
               <CardHeader>
@@ -492,7 +546,6 @@ export default function SpelarePage() {
                   Pensionerade spelare
                 </CardTitle>
               </CardHeader>
-
               <CardContent>
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                   {dashboard.retiredPlayers.map((row) => (
@@ -509,6 +562,158 @@ export default function SpelarePage() {
 }
 
 // ─── Components ───────────────────────────────────────────────────────────────
+
+function PlayerCard({ row }: { row: PlayerWithStats }) {
+  const { player, stats, rank } = row
+  const name = displayName(player)
+
+  return (
+    <div className="relative overflow-hidden rounded-2xl border border-border bg-card p-5 shadow-sm">
+      <div className="absolute -right-8 -top-8 h-28 w-28 rounded-full bg-primary/10" />
+      <div className="absolute right-4 top-4 text-6xl font-black leading-none text-muted-foreground/10">
+        #{rank}
+      </div>
+
+      <div className="relative flex flex-col gap-4">
+        {/* Header */}
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <RankBadge rank={rank} />
+              <h3 className="text-xl font-extrabold tracking-tight text-foreground">
+                {player.spelarnamn}
+              </h3>
+              {/* Streak badge */}
+              <StreakBadge streak={stats.streak} />
+            </div>
+            <div className="mt-2 text-sm text-muted-foreground">
+              {name !== player.spelarnamn ? name : "Namn saknas"}
+            </div>
+            <div className="mt-1 text-xs text-muted-foreground">
+              Golf-ID: {player.golfid && player.golfid.trim() !== "" ? player.golfid : "–"}
+            </div>
+          </div>
+
+          <div className="rounded-2xl bg-primary/10 p-3 text-primary shrink-0">
+            <UserRound className="h-6 w-6" />
+          </div>
+        </div>
+
+        {/* Stats grid */}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <MiniStat label="Poäng" value={stats.totalPoang} icon={Trophy} highlight="good" />
+          <MiniStat label="Tävlingar" value={stats.antalTavlingar} icon={Target} />
+          <MiniStat label="Vinster" value={stats.antalVinster} icon={Star} highlight={stats.antalVinster > 0 ? "good" : "neutral"} />
+          <MiniStat label="Sistaplatser" value={stats.antalSista} icon={Skull} highlight={stats.antalSista > 0 ? "bad" : "neutral"} />
+        </div>
+
+        {/* Par details */}
+        <div className="grid gap-3 sm:grid-cols-3">
+          <DetailBox label="Snitt mot par" value={formatSigned(stats.snittMotPar)} positive={stats.snittMotPar !== null && stats.snittMotPar <= 0} />
+          <DetailBox label="Bästa runda" value={formatSigned(stats.bastaMotPar, 0)} positive />
+          <DetailBox label="Sämsta runda" value={formatSigned(stats.samstaMotPar, 0)} negative />
+        </div>
+
+        {/* Latest + form */}
+        <div className="flex flex-col gap-3 rounded-2xl bg-secondary/30 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+              Senaste start
+            </div>
+            <div className="mt-1 text-sm font-semibold text-foreground">
+              {stats.latestDate
+                ? `#${stats.latestPlacement}, ${stats.latestPoang} p · ${formatDate(stats.latestDate)}`
+                : "Ingen start registrerad"}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            {stats.formPlacements.length > 0 ? (
+              stats.formPlacements.map((placement, idx) => (
+                <FormBadge key={idx} placement={placement} />
+              ))
+            ) : (
+              <span className="text-sm text-muted-foreground">Ingen formdata</span>
+            )}
+          </div>
+        </div>
+
+        {/* Nemesis & Offer — only show if data exists */}
+        {(stats.nemesis || stats.offer) && (
+          <div className="grid gap-2 sm:grid-cols-2">
+            {stats.nemesis && (
+              <div className="flex items-center gap-3 rounded-xl border border-destructive/20 bg-destructive/5 px-3 py-2.5">
+                <Swords className="h-4 w-4 text-destructive shrink-0" />
+                <div className="min-w-0">
+                  <div className="text-xs font-bold uppercase tracking-wide text-destructive">
+                    Nemesis
+                  </div>
+                  <div className="text-sm font-semibold text-foreground truncate">
+                    {stats.nemesis.spelare}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {stats.nemesis.wins}–{stats.nemesis.losses} mot dem
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {stats.offer && (
+              <div className="flex items-center gap-3 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2.5">
+                <Rabbit className="h-4 w-4 text-primary shrink-0" />
+                <div className="min-w-0">
+                  <div className="text-xs font-bold uppercase tracking-wide text-primary">
+                    Offer
+                  </div>
+                  <div className="text-sm font-semibold text-foreground truncate">
+                    {stats.offer.spelare}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {stats.offer.wins}–{stats.offer.losses} mot dem
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function StreakBadge({
+  streak,
+}: {
+  streak: { type: "win" | "top3" | "last" | null; count: number }
+}) {
+  if (!streak.type || streak.count < 2) return null
+
+  if (streak.type === "win") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-primary px-2 py-0.5 text-xs font-bold text-primary-foreground">
+        🔥 {streak.count} raka vinster
+      </span>
+    )
+  }
+
+  if (streak.type === "top3") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-bold text-primary">
+        ⬆️ {streak.count} raka topp-3
+      </span>
+    )
+  }
+
+  if (streak.type === "last") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2 py-0.5 text-xs font-bold text-destructive">
+        💀 {streak.count} raka sistaplatser
+      </span>
+    )
+  }
+
+  return null
+}
 
 function StatCard({
   title,
@@ -530,11 +735,8 @@ function StatCard({
             <Icon className="h-4 w-4" />
           </div>
         </div>
-
         <div>
-          <div className="text-2xl font-extrabold tracking-tight text-foreground">
-            {value}
-          </div>
+          <div className="text-2xl font-extrabold tracking-tight text-foreground">{value}</div>
           <div className="mt-1 text-sm text-muted-foreground">{sub}</div>
         </div>
       </CardContent>
@@ -583,11 +785,8 @@ function TopFive({ players }: { players: PlayerWithStats[] }) {
               </div>
             </div>
           </div>
-
           <div className="text-right">
-            <div className="font-extrabold tabular-nums text-foreground">
-              {row.stats.totalPoang}
-            </div>
+            <div className="font-extrabold tabular-nums text-foreground">{row.stats.totalPoang}</div>
             <div className="text-xs text-muted-foreground">poäng</div>
           </div>
         </div>
@@ -596,128 +795,16 @@ function TopFive({ players }: { players: PlayerWithStats[] }) {
   )
 }
 
-function PlayerCard({ row }: { row: PlayerWithStats }) {
-  const { player, stats, rank } = row
-  const name = displayName(player)
-
-  return (
-    <div className="relative overflow-hidden rounded-2xl border border-border bg-card p-5 shadow-sm">
-      <div className="absolute -right-8 -top-8 h-28 w-28 rounded-full bg-primary/10" />
-      <div className="absolute right-4 top-4 text-6xl font-black leading-none text-muted-foreground/10">
-        #{rank}
-      </div>
-
-      <div className="relative flex flex-col gap-5">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <RankBadge rank={rank} />
-              <h3 className="text-xl font-extrabold tracking-tight text-foreground">
-                {player.spelarnamn}
-              </h3>
-            </div>
-
-            <div className="mt-2 text-sm text-muted-foreground">
-              {name !== player.spelarnamn ? name : "Namn saknas"}
-            </div>
-
-            <div className="mt-1 text-xs text-muted-foreground">
-              Golf-ID: {player.golfid && player.golfid.trim() !== "" ? player.golfid : "–"}
-            </div>
-          </div>
-
-          <div className="rounded-2xl bg-primary/10 p-3 text-primary">
-            <UserRound className="h-6 w-6" />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <MiniStat
-            label="Poäng"
-            value={stats.totalPoang}
-            icon={Trophy}
-            highlight="good"
-          />
-          <MiniStat
-            label="Tävlingar"
-            value={stats.antalTavlingar}
-            icon={Target}
-          />
-          <MiniStat
-            label="Vinster"
-            value={stats.antalVinster}
-            icon={Star}
-            highlight={stats.antalVinster > 0 ? "good" : "neutral"}
-          />
-          <MiniStat
-            label="Sistaplatser"
-            value={stats.antalSista}
-            icon={Skull}
-            highlight={stats.antalSista > 0 ? "bad" : "neutral"}
-          />
-        </div>
-
-        <div className="grid gap-3 sm:grid-cols-3">
-          <DetailBox
-            label="Snitt mot par"
-            value={formatSigned(stats.snittMotPar)}
-            positive={stats.snittMotPar !== null && stats.snittMotPar <= 0}
-          />
-          <DetailBox
-            label="Bästa runda"
-            value={formatSigned(stats.bastaMotPar, 0)}
-            positive
-          />
-          <DetailBox
-            label="Sämsta runda"
-            value={formatSigned(stats.samstaMotPar, 0)}
-            negative
-          />
-        </div>
-
-        <div className="flex flex-col gap-3 rounded-2xl bg-secondary/30 p-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
-              Senaste start
-            </div>
-            <div className="mt-1 text-sm font-semibold text-foreground">
-              {stats.latestDate
-                ? `#${stats.latestPlacement}, ${stats.latestPoang} p · ${formatDate(
-                    stats.latestDate
-                  )}`
-                : "Ingen start registrerad"}
-            </div>
-          </div>
-
-          <div className="flex items-center gap-1.5">
-            {stats.formPlacements.length > 0 ? (
-              stats.formPlacements.map((placement, idx) => (
-                <FormBadge key={idx} placement={placement} />
-              ))
-            ) : (
-              <span className="text-sm text-muted-foreground">Ingen formdata</span>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 function RetiredPlayerCard({ row }: { row: PlayerWithStats }) {
   return (
     <div className="rounded-2xl border border-border bg-secondary/25 p-4">
       <div className="font-bold text-foreground">{row.player.spelarnamn}</div>
-      <div className="mt-1 text-sm text-muted-foreground">
-        {displayName(row.player)}
-      </div>
-
+      <div className="mt-1 text-sm text-muted-foreground">{displayName(row.player)}</div>
       <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
         <div className="rounded-xl bg-background p-3">
           <div className="text-xs text-muted-foreground">Poäng</div>
           <div className="font-bold text-foreground">{row.stats.totalPoang}</div>
         </div>
-
         <div className="rounded-xl bg-background p-3">
           <div className="text-xs text-muted-foreground">Tävlingar</div>
           <div className="font-bold text-foreground">{row.stats.antalTavlingar}</div>
@@ -739,11 +826,7 @@ function MiniStat({
   highlight?: "good" | "bad" | "neutral"
 }) {
   const valueClass =
-    highlight === "good"
-      ? "text-primary"
-      : highlight === "bad"
-        ? "text-destructive"
-        : "text-foreground"
+    highlight === "good" ? "text-primary" : highlight === "bad" ? "text-destructive" : "text-foreground"
 
   return (
     <div className="rounded-xl bg-secondary/40 p-3">
@@ -751,9 +834,7 @@ function MiniStat({
         <Icon className="h-3.5 w-3.5 text-primary" />
         {label}
       </div>
-      <div className={`mt-1 text-xl font-extrabold tabular-nums ${valueClass}`}>
-        {value}
-      </div>
+      <div className={`mt-1 text-xl font-extrabold tabular-nums ${valueClass}`}>{value}</div>
     </div>
   )
 }
@@ -769,20 +850,12 @@ function DetailBox({
   positive?: boolean
   negative?: boolean
 }) {
-  const valueClass = positive
-    ? "text-primary"
-    : negative
-      ? "text-destructive"
-      : "text-foreground"
+  const valueClass = positive ? "text-primary" : negative ? "text-destructive" : "text-foreground"
 
   return (
     <div className="rounded-xl border border-border p-3">
-      <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        {label}
-      </div>
-      <div className={`mt-1 text-lg font-black tabular-nums ${valueClass}`}>
-        {value}
-      </div>
+      <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className={`mt-1 text-lg font-black tabular-nums ${valueClass}`}>{value}</div>
     </div>
   )
 }
@@ -798,9 +871,7 @@ function RankBadge({ rank }: { rank: number }) {
           : "bg-background text-foreground"
 
   return (
-    <div
-      className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-black shadow-sm ${className}`}
-    >
+    <div className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-black shadow-sm ${className}`}>
       {rank}
     </div>
   )
@@ -840,7 +911,6 @@ function LoadingState() {
           <div key={i} className="h-32 animate-pulse rounded-2xl bg-muted" />
         ))}
       </section>
-
       <div className="grid gap-4 lg:grid-cols-2">
         {[1, 2, 3, 4].map((i) => (
           <div key={i} className="h-80 animate-pulse rounded-2xl bg-muted" />
@@ -857,11 +927,8 @@ function EmptyState() {
         <div className="rounded-full bg-secondary p-4">
           <Users className="h-8 w-8 text-muted-foreground" />
         </div>
-
         <div>
-          <div className="text-lg font-bold text-foreground">
-            Inga spelare hittades
-          </div>
+          <div className="text-lg font-bold text-foreground">Inga spelare hittades</div>
           <p className="mt-1 text-sm text-muted-foreground">
             Kontrollera att tabellen spelare innehåller data.
           </p>
