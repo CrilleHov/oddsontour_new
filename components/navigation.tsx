@@ -29,7 +29,6 @@ const links = [
   { href: "/bilder", label: "Bilder", icon: Images },
   { href: "/countdown", label: "Countdown", icon: Timer },
   { href: "/historia", label: "Historia & Info", icon: BookOpen },
-  { href: "/prognos", label: "Prognos inför finalen", icon: BookOpen },
 ]
 
 export function Navigation() {
