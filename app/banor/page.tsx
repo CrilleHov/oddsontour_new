@@ -506,21 +506,21 @@ export default function BanorPage() {
               </CardHeader>
 
               <CardContent>
-                <div className="h-96">
+                <div style={{ height: `${Math.max(300, dashboard.courseStats.length * 40)}px` }}>
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart
                       data={chartData}
-                      margin={{ top: 10, right: 10, left: 0, bottom: 20 }}
+                      layout="vertical"
+                      margin={{ top: 5, right: 30, left: 120, bottom: 5 }}
                     >
                       <CartesianGrid strokeDasharray="3 3" opacity={0.25} />
-                      <XAxis
+                      <XAxis type="number" tick={{ fontSize: 12 }} />
+                      <YAxis
+                        type="category"
                         dataKey="name"
+                        width={120}
                         tick={{ fontSize: 12 }}
-                        interval={0}
-                        angle={-20}
-                        textAnchor="end"
                       />
-                      <YAxis tick={{ fontSize: 12 }} />
                       <Tooltip
                         formatter={(value) => [
                           formatSigned(Number(value), 1),
@@ -533,7 +533,7 @@ export default function BanorPage() {
                           return item?.fullName ?? label
                         }}
                       />
-                      <Bar dataKey="snittMotPar" radius={[8, 8, 0, 0]}>
+                      <Bar dataKey="snittMotPar" radius={[0, 8, 8, 0]}>
                         {chartData.map((_, i) => (
                           <Cell key={i} fill={chartColor(i)} />
                         ))}
