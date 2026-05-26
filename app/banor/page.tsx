@@ -74,6 +74,14 @@ type CourseStats = {
   samstaSpelare: { spelare: string; snittMotPar: number } | null
 }
 
+type CourseRoundRow = {
+  rank: number
+  datum: string
+  bana: string
+  spelare: string
+  motPar: number | null
+}
+
 const COMP_TABLE = "competitions"
 const LB_TABLE = "leaderboard"
 
@@ -126,6 +134,29 @@ function isMajor(value: string | null | undefined) {
 
 function chartColor(index: number) {
   return COLORS[index % COLORS.length]
+}
+
+function dateKey(dateStr: string | null | undefined) {
+  return String(dateStr ?? "").slice(0, 10)
+}
+
+function compareRoundsBestToWorst(
+  a: Omit<CourseRoundRow, "rank">,
+  b: Omit<CourseRoundRow, "rank">
+) {
+  const aHasPar = a.motPar !== null && a.motPar !== undefined
+  const bHasPar = b.motPar !== null && b.motPar !== undefined
+
+  if (aHasPar && bHasPar && Number(a.motPar) !== Number(b.motPar)) {
+    return Number(a.motPar) - Number(b.motPar)
+  }
+
+  if (aHasPar !== bHasPar) return aHasPar ? -1 : 1
+
+  const dateCompare = b.datum.localeCompare(a.datum)
+  if (dateCompare !== 0) return dateCompare
+
+  return a.spelare.localeCompare(b.spelare, "sv")
 }
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
@@ -231,13 +262,13 @@ export default function BanorPage() {
     const compLookup = new Map<string, CompetitionRow>()
 
     for (const c of filteredCompetitions) {
-      compLookup.set(c.datum, c)
+      compLookup.set(dateKey(c.datum), c)
     }
 
     const byCourse = new Map<string, LBRow[]>()
 
     for (const r of filteredRows) {
-      const comp = compLookup.get(r.tavling)
+      const comp = compLookup.get(dateKey(r.tavling))
       
       // Skip rows that don't have a matching competition in filteredCompetitions
       // (i.e., skip rows from major competitions)
@@ -261,7 +292,7 @@ export default function BanorPage() {
         const latestDate = dates.at(-1) ?? null
 
         const compsForCourse = dates
-          .map((d) => compLookup.get(d))
+          .map((d) => compLookup.get(dateKey(d)))
           .filter(Boolean) as CompetitionRow[]
 
         const latestWinner =
@@ -606,6 +637,13 @@ export default function BanorPage() {
               </div>
             </CardContent>
           </Card>
+
+          <CourseRoundsSection
+            courseStats={dashboard.courseStats}
+            competitions={competitions}
+            lbRows={lbRows}
+            selectedYear={selectedYear}
+          />
         </>
       )}
     </div>
@@ -613,6 +651,192 @@ export default function BanorPage() {
 }
 
 // ─── Components ───────────────────────────────────────────────────────────────
+
+function CourseRoundsSection({
+  courseStats,
+  competitions,
+  lbRows,
+  selectedYear,
+}: {
+  courseStats: CourseStats[]
+  competitions: CompetitionRow[]
+  lbRows: LBRow[]
+  selectedYear: string
+}) {
+  const courseNames = useMemo(
+    () => courseStats.map((course) => course.bana),
+    [courseStats]
+  )
+
+  const [selectedCourse, setSelectedCourse] = useState<string | null>(
+    courseNames[0] ?? null
+  )
+
+  useEffect(() => {
+    if (courseNames.length === 0) {
+      if (selectedCourse !== null) setSelectedCourse(null)
+      return
+    }
+
+    if (!selectedCourse || !courseNames.includes(selectedCourse)) {
+      setSelectedCourse(courseNames[0])
+    }
+  }, [courseNames, selectedCourse])
+
+  const effectiveSelectedCourse =
+    selectedCourse && courseNames.includes(selectedCourse)
+      ? selectedCourse
+      : courseNames[0] ?? null
+
+  const rounds = useMemo<CourseRoundRow[]>(() => {
+    if (!effectiveSelectedCourse) return []
+
+    const yearFilter =
+      selectedYear === "all" ? null : Number.parseInt(selectedYear, 10)
+
+    const competitionByDate = new Map<string, CompetitionRow>()
+
+    for (const competition of competitions) {
+      if (yearFilter && yearFromDate(competition.datum) !== yearFilter) continue
+      competitionByDate.set(dateKey(competition.datum), competition)
+    }
+
+    return lbRows
+      .filter((row) => Number(row.placering) > 0)
+      .filter((row) => {
+        if (!yearFilter) return true
+        return yearFromDate(row.tavling) === yearFilter
+      })
+      .map<Omit<CourseRoundRow, "rank"> | null>((row) => {
+        const competition = competitionByDate.get(dateKey(row.tavling))
+        if (!competition) return null
+
+        const bana = competition.bana ?? `[Okänd] ${row.tavling}`
+        if (bana !== effectiveSelectedCourse) return null
+
+        return {
+          datum: row.tavling,
+          bana,
+          spelare: row.spelare,
+          motPar:
+            row.motPar !== null && row.motPar !== undefined
+              ? Number(row.motPar)
+              : null,
+        }
+      })
+      .filter((row): row is Omit<CourseRoundRow, "rank"> => row !== null)
+      .sort(compareRoundsBestToWorst)
+      .map((row, index) => ({
+        ...row,
+        rank: index + 1,
+      }))
+  }, [competitions, effectiveSelectedCourse, lbRows, selectedYear])
+
+  if (courseNames.length === 0) return null
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-lg">
+          <Trophy className="h-5 w-5 text-primary" />
+          Alla ronder per bana
+        </CardTitle>
+      </CardHeader>
+
+      <CardContent>
+        <div className="flex flex-col gap-4">
+          <div>
+            <div className="mb-2 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+              Välj bana
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {courseNames.map((course) => {
+                const isSelected = course === effectiveSelectedCourse
+
+                return (
+                  <button
+                    key={course}
+                    type="button"
+                    onClick={() => setSelectedCourse(course)}
+                    className={`rounded-full border px-3 py-1.5 text-sm font-semibold transition ${
+                      isSelected
+                        ? "border-primary bg-primary text-primary-foreground"
+                        : "border-border bg-background text-foreground hover:bg-secondary"
+                    }`}
+                  >
+                    {course}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-border bg-secondary/20 p-4">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                  Vald bana
+                </div>
+                <div className="mt-1 text-xl font-extrabold tracking-tight text-foreground">
+                  {effectiveSelectedCourse}
+                </div>
+              </div>
+
+              <div className="text-sm font-semibold text-muted-foreground">
+                {rounds.length} registrerade {rounds.length === 1 ? "rond" : "ronder"}
+              </div>
+            </div>
+          </div>
+
+          {rounds.length === 0 ? (
+            <p className="rounded-2xl bg-secondary/30 p-4 text-sm text-muted-foreground">
+              Inga registrerade ronder hittades för vald bana och valt år.
+            </p>
+          ) : (
+            <div className="overflow-hidden rounded-2xl border border-border">
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[680px] text-sm">
+                  <thead className="bg-secondary/60 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                    <tr>
+                      <th className="px-4 py-3 text-left">Rank</th>
+                      <th className="px-4 py-3 text-left">Datum</th>
+                      <th className="px-4 py-3 text-left">Bana</th>
+                      <th className="px-4 py-3 text-left">Spelare</th>
+                      <th className="px-4 py-3 text-right">Mot par</th>
+                    </tr>
+                  </thead>
+
+                  <tbody className="divide-y divide-border bg-card">
+                    {rounds.map((round) => (
+                      <tr key={`${round.datum}-${round.spelare}`}>
+                        <td className="px-4 py-3 font-black tabular-nums text-foreground">
+                          #{round.rank}
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground">
+                          {formatDate(round.datum)}
+                        </td>
+                        <td className="px-4 py-3 font-semibold text-foreground">
+                          {round.bana}
+                        </td>
+                        <td className="px-4 py-3 text-foreground">
+                          {round.spelare}
+                        </td>
+                        <td className="px-4 py-3 text-right font-black tabular-nums text-foreground">
+                          {formatSigned(round.motPar, 0)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
 
 function StatCard({
   title,
