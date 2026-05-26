@@ -255,6 +255,35 @@ function calcStats(
   }
 }
 
+function hasValidMotPar(round: LBRow) {
+  return round.motPar !== null && round.motPar !== undefined && !Number.isNaN(Number(round.motPar))
+}
+
+function compareRoundsBestToWorst(a: LBRow, b: LBRow) {
+  const aHasPar = hasValidMotPar(a)
+  const bHasPar = hasValidMotPar(b)
+
+  // Primary sort: lower motPar = better round
+  if (aHasPar && bHasPar && Number(a.motPar) !== Number(b.motPar)) {
+    return Number(a.motPar) - Number(b.motPar)
+  }
+
+  // Rounds with motPar should be shown before rounds without motPar
+  if (aHasPar && !bHasPar) return -1
+  if (!aHasPar && bHasPar) return 1
+
+  // Fallbacks if motPar is tied/missing
+  if (Number(a.placering) !== Number(b.placering)) {
+    return Number(a.placering) - Number(b.placering)
+  }
+
+  if (Number(a.poang ?? 0) !== Number(b.poang ?? 0)) {
+    return Number(b.poang ?? 0) - Number(a.poang ?? 0)
+  }
+
+  return b.tavling.localeCompare(a.tavling)
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function SpelarePage() {
@@ -264,6 +293,7 @@ export default function SpelarePage() {
   const [lbRows, setLbRows] = useState<LBRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [selectedRoundsPlayer, setSelectedRoundsPlayer] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -555,6 +585,14 @@ export default function SpelarePage() {
               </CardContent>
             </Card>
           )}
+
+          {/* Registered rounds */}
+          <PlayerRoundsSection
+            players={dashboard.allPlayerStats}
+            lbRows={lbRows}
+            selectedPlayer={selectedRoundsPlayer}
+            onSelectPlayer={setSelectedRoundsPlayer}
+          />
         </>
       )}
     </div>
@@ -792,6 +830,181 @@ function TopFive({ players }: { players: PlayerWithStats[] }) {
         </div>
       ))}
     </div>
+  )
+}
+
+
+function PlayerRoundsSection({
+  players,
+  lbRows,
+  selectedPlayer,
+  onSelectPlayer,
+}: {
+  players: PlayerWithStats[]
+  lbRows: LBRow[]
+  selectedPlayer: string | null
+  onSelectPlayer: (player: string) => void
+}) {
+  const availablePlayers = players
+    .filter((row) => row.stats.antalTavlingar > 0)
+    .sort((a, b) => {
+      const activeDiff = Number(isActive(b.player.aktiv)) - Number(isActive(a.player.aktiv))
+      if (activeDiff !== 0) return activeDiff
+      return displayName(a.player).localeCompare(displayName(b.player), "sv")
+    })
+
+  const selectedName =
+    selectedPlayer && availablePlayers.some((row) => row.player.spelarnamn === selectedPlayer)
+      ? selectedPlayer
+      : availablePlayers[0]?.player.spelarnamn ?? null
+
+  const selectedRow = selectedName
+    ? availablePlayers.find((row) => row.player.spelarnamn === selectedName) ?? null
+    : null
+
+  const rounds = useMemo(() => {
+    if (!selectedName) return []
+
+    return lbRows
+      .filter((round) => round.spelare === selectedName && Number(round.placering) > 0)
+      .sort(compareRoundsBestToWorst)
+  }, [lbRows, selectedName])
+
+  const bestRound = rounds[0] ?? null
+  const worstRound = rounds.at(-1) ?? null
+
+  if (availablePlayers.length === 0) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-lg">
+            <CalendarDays className="h-5 w-5 text-primary" />
+            Registrerade ronder
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">
+            Inga registrerade ronder hittades.
+          </p>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <CalendarDays className="h-5 w-5 text-primary" />
+              Registrerade ronder per spelare
+            </CardTitle>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Klicka på en spelare för att se alla registrerade ronder, sorterade från bästa till sämsta rond.
+            </p>
+          </div>
+
+          {selectedRow && (
+            <div className="w-fit rounded-full bg-primary/10 px-3 py-1 text-sm font-bold text-primary">
+              {selectedRow.stats.antalTavlingar} ronder
+            </div>
+          )}
+        </div>
+      </CardHeader>
+
+      <CardContent className="flex flex-col gap-5">
+        <div className="flex flex-wrap gap-2">
+          {availablePlayers.map((row) => {
+            const isSelected = row.player.spelarnamn === selectedName
+
+            return (
+              <button
+                key={row.player.id}
+                type="button"
+                onClick={() => onSelectPlayer(row.player.spelarnamn)}
+                className={`rounded-full border px-3 py-1.5 text-sm font-bold transition ${
+                  isSelected
+                    ? "border-primary bg-primary text-primary-foreground shadow-sm"
+                    : "border-border bg-background text-foreground hover:bg-secondary/60"
+                }`}
+              >
+                {row.player.spelarnamn}
+              </button>
+            )
+          })}
+        </div>
+
+        {selectedRow ? (
+          <div className="flex flex-col gap-4">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <InfoBox
+                label="Bästa rond"
+                value={
+                  bestRound
+                    ? `${formatSigned(bestRound.motPar, 0)} · ${formatDate(bestRound.tavling)}`
+                    : "–"
+                }
+                icon={TrendingUp}
+              />
+              <InfoBox
+                label="Sämsta rond"
+                value={
+                  worstRound
+                    ? `${formatSigned(worstRound.motPar, 0)} · ${formatDate(worstRound.tavling)}`
+                    : "–"
+                }
+                icon={TrendingDown}
+              />
+              <InfoBox
+                label="Snitt mot par"
+                value={formatSigned(selectedRow.stats.snittMotPar)}
+                icon={Target}
+              />
+            </div>
+
+            <div className="overflow-hidden rounded-2xl border border-border">
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[680px] text-sm">
+                  <thead className="bg-secondary/60 text-xs uppercase tracking-wide text-muted-foreground">
+                    <tr>
+                      <th className="px-4 py-3 text-left font-bold">Rank</th>
+                      <th className="px-4 py-3 text-left font-bold">Tävling</th>
+                      <th className="px-4 py-3 text-right font-bold">Mot par</th>
+                      <th className="px-4 py-3 text-right font-bold">Poäng</th>
+                      <th className="px-4 py-3 text-right font-bold">Placering</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border bg-card">
+                    {rounds.map((round, idx) => (
+                      <tr key={`${round.spelare}-${round.tavling}-${idx}`} className="hover:bg-secondary/30">
+                        <td className="px-4 py-3 font-black text-foreground">#{idx + 1}</td>
+                        <td className="px-4 py-3 font-semibold text-foreground">
+                          {formatDate(round.tavling)}
+                        </td>
+                        <td className="px-4 py-3 text-right font-black tabular-nums text-foreground">
+                          {formatSigned(round.motPar, 0)}
+                        </td>
+                        <td className="px-4 py-3 text-right font-bold tabular-nums text-foreground">
+                          {Number(round.poang ?? 0)}
+                        </td>
+                        <td className="px-4 py-3 text-right text-muted-foreground">
+                          #{round.placering} av {round.antal_spelare}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Välj en spelare för att visa registrerade ronder.
+          </p>
+        )}
+      </CardContent>
+    </Card>
   )
 }
 
