@@ -41,6 +41,12 @@ type LBRow = {
   antal_spelare: number
   motPar: number | null
   tavling: string
+  bana: string | null
+}
+
+type CompetitionRow = {
+  datum: string
+  bana: string | null
 }
 
 type PlayerStats = {
@@ -71,6 +77,7 @@ type PlayerWithStats = {
 
 const PLAYERS_TABLE = "spelare"
 const LB_TABLE = "leaderboard"
+const COMPETITIONS_TABLE = "competitions"
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -99,6 +106,11 @@ function formatDate(dateStr: string | null | undefined) {
     month: "short",
     year: "numeric",
   }).format(date)
+}
+
+function formatCourse(course: string | null | undefined) {
+  const value = (course ?? "").trim()
+  return value.length > 0 ? value : "–"
 }
 
 // Build head-to-head map: for each pair, how many times did each win?
@@ -305,6 +317,7 @@ export default function SpelarePage() {
       const [
         { data: playerData, error: playerErr },
         { data: lbData, error: lbErr },
+        { data: competitionData, error: competitionErr },
       ] = await Promise.all([
         supabase
           .from(PLAYERS_TABLE)
@@ -323,17 +336,33 @@ export default function SpelarePage() {
             antal_spelare,
             motPar:mot_par
           `
-          )
-          .returns<LBRow[]>(),
+          ),
+
+        supabase
+          .from(COMPETITIONS_TABLE)
+          .select("datum, bana"),
       ])
 
       if (cancelled) return
 
       if (playerErr) { setError(playerErr.message); setLoading(false); return }
       if (lbErr) { setError(lbErr.message); setLoading(false); return }
+      if (competitionErr) { setError(competitionErr.message); setLoading(false); return }
+
+      const courseByDate = new Map(
+        ((competitionData ?? []) as CompetitionRow[]).map((competition) => [
+          String(competition.datum).slice(0, 10),
+          competition.bana,
+        ])
+      )
+
+      const lbRowsWithCourse = ((lbData ?? []) as Omit<LBRow, "bana">[]).map((row) => ({
+        ...row,
+        bana: courseByDate.get(String(row.tavling).slice(0, 10)) ?? null,
+      }))
 
       setPlayers((playerData ?? []) as PlayerRow[])
-      setLbRows((lbData ?? []) as LBRow[])
+      setLbRows(lbRowsWithCourse)
       setLoading(false)
     }
 
@@ -942,7 +971,7 @@ function PlayerRoundsSection({
                 label="Bästa rond"
                 value={
                   bestRound
-                    ? `${formatSigned(bestRound.motPar, 0)} · ${formatDate(bestRound.tavling)}`
+                    ? `${formatSigned(bestRound.motPar, 0)} · ${formatCourse(bestRound.bana)}`
                     : "–"
                 }
                 icon={TrendingUp}
@@ -951,7 +980,7 @@ function PlayerRoundsSection({
                 label="Sämsta rond"
                 value={
                   worstRound
-                    ? `${formatSigned(worstRound.motPar, 0)} · ${formatDate(worstRound.tavling)}`
+                    ? `${formatSigned(worstRound.motPar, 0)} · ${formatCourse(worstRound.bana)}`
                     : "–"
                 }
                 icon={TrendingDown}
@@ -965,13 +994,13 @@ function PlayerRoundsSection({
 
             <div className="overflow-hidden rounded-2xl border border-border">
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[680px] text-sm">
+                <table className="w-full min-w-[760px] text-sm">
                   <thead className="bg-secondary/60 text-xs uppercase tracking-wide text-muted-foreground">
                     <tr>
                       <th className="px-4 py-3 text-left font-bold">Rank</th>
                       <th className="px-4 py-3 text-left font-bold">Tävling</th>
+                      <th className="px-4 py-3 text-left font-bold">Bana</th>
                       <th className="px-4 py-3 text-right font-bold">Mot par</th>
-                      <th className="px-4 py-3 text-right font-bold">Poäng</th>
                       <th className="px-4 py-3 text-right font-bold">Placering</th>
                     </tr>
                   </thead>
@@ -982,11 +1011,11 @@ function PlayerRoundsSection({
                         <td className="px-4 py-3 font-semibold text-foreground">
                           {formatDate(round.tavling)}
                         </td>
+                        <td className="px-4 py-3 text-muted-foreground">
+                          {formatCourse(round.bana)}
+                        </td>
                         <td className="px-4 py-3 text-right font-black tabular-nums text-foreground">
                           {formatSigned(round.motPar, 0)}
-                        </td>
-                        <td className="px-4 py-3 text-right font-bold tabular-nums text-foreground">
-                          {Number(round.poang ?? 0)}
                         </td>
                         <td className="px-4 py-3 text-right text-muted-foreground">
                           #{round.placering} av {round.antal_spelare}
