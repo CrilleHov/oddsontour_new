@@ -19,6 +19,7 @@ import {
   AlertTriangle,
   Banknote,
   BarChart3,
+  CalendarDays,
   Crown,
   Flame,
   Lock,
@@ -51,9 +52,26 @@ type PlayerRow = {
   aktiv: number | boolean | null
 }
 
+type FeeRule = {
+  regel: string
+  antal: number
+  belopp: number
+}
+
 type FeeRow = {
   spelare: string
   belopp: number
+  ar: number
+  tavling_datum: string | null
+  regler: FeeRule[] | null
+}
+
+type CompetitionRow = {
+  datum: string
+  bana: string | null
+  host: string | null
+  major: number | boolean | null
+  plats: string | null
   ar: number
 }
 
@@ -66,28 +84,40 @@ type ShameRow = {
   spelare: string
   total: number
   antalAr: number
+  antalTavlingar: number
   snittPerAr: number
+  snittPerTavling: number
 }
 
 const PLAYERS_TABLE = "spelare"
 const FEES_TABLE = "fees"
 const TOT_TABLE = "tot_böter"
+const COMPETITIONS_TABLE = "competitions"
 
-const RULES = [
-  { rule: "Streck/0 poäng", amount: "10 kr" },
-  { rule: "Kissar på golfbanan", amount: "50 kr" },
-  { rule: "Kastar utrustning", amount: "100 kr/gång" },
-  { rule: "Kastar boll", amount: "50 kr/boll" },
-  { rule: "Tappar bort järnheadcovers", amount: "50 kr/st" },
-  { rule: "Inte på golfbanan 30 min innan FÖRSTA starttid", amount: "50 kr" },
-  { rule: "Har ej straffutrustning", amount: "1000 kr" },
-  { rule: "Inte har minst ett Race to Sand-plagg på sig", amount: "100 kr" },
-  { rule: "Bira-boll", amount: "20 kr" },
-  { rule: "HIO/Albatross: de andra spelarna böter", amount: "100 kr" },
-  { rule: "Ej tillgänglig att scoreföra på Gamebook", amount: "100 kr" },
-  { rule: "Ej bötesswish samma dag som tävling", amount: "200 kr" },
-  { rule: "Dålig anledning till att inte vara med på tävling", amount: "100 kr" },
-  { rule: "Anonymitet", amount: "50 kr" },
+const ALLA_TAVLINGAR = "alla"
+
+type Rule = {
+  rule: string
+  belopp: number
+  per?: string
+  gemensam?: boolean
+}
+
+const RULES: Rule[] = [
+  { rule: "Streck/0 poäng", belopp: 10 },
+  { rule: "Kissar på golfbanan", belopp: 50 },
+  { rule: "Kastar utrustning", belopp: 100, per: "gång" },
+  { rule: "Kastar boll", belopp: 50, per: "boll" },
+  { rule: "Tappar bort järnheadcovers", belopp: 50, per: "st" },
+  { rule: "Inte på golfbanan 30 min innan FÖRSTA starttid", belopp: 50 },
+  { rule: "Har ej straffutrustning", belopp: 1000 },
+  { rule: "Inte har minst ett Race to Sand-plagg på sig", belopp: 100 },
+  { rule: "Bira-boll", belopp: 20 },
+  { rule: "HIO/Albatross: de andra spelarna böter", belopp: 100, gemensam: true },
+  { rule: "Ej tillgänglig att scoreföra på Gamebook", belopp: 100 },
+  { rule: "Ej bötesswish samma dag som tävling", belopp: 200 },
+  { rule: "Dålig anledning till att inte vara med på tävling", belopp: 100 },
+  { rule: "Anonymitet", belopp: 50 },
 ]
 
 const COLORS = [
@@ -103,8 +133,17 @@ function isActive(v: PlayerRow["aktiv"]) {
   return Number(v) === 1
 }
 
+function isMajor(v: CompetitionRow["major"]) {
+  if (typeof v === "boolean") return v
+  return Number(v) === 1
+}
+
 function playerNickname(p: PlayerRow) {
   return (p.spelarnamn ?? "").trim()
+}
+
+function ruleLabel(r: Rule) {
+  return r.per ? `${r.belopp} kr/${r.per}` : `${r.belopp} kr`
 }
 
 function formatDateSv(dateString: string | null | undefined) {
@@ -119,6 +158,17 @@ function formatDateSv(dateString: string | null | undefined) {
   if (Number.isNaN(d.getTime())) return dateString
 
   return d.toLocaleDateString("sv-SE")
+}
+
+function shortDateSv(dateString: string | null | undefined) {
+  if (!dateString) return ""
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) return dateString.slice(5)
+  return formatDateSv(dateString) ?? ""
+}
+
+function competitionLabel(c: CompetitionRow) {
+  const namn = c.bana ?? c.plats ?? "Okänd bana"
+  return `${formatDateSv(c.datum)} · ${namn}${isMajor(c.major) ? " ★" : ""}`
 }
 
 function money(value: number | null | undefined) {
@@ -137,19 +187,23 @@ export default function BoterPage() {
   const supabase = useMemo(() => createClient(), [])
 
   const [activePlayers, setActivePlayers] = useState<string[]>([])
+  const [competitions, setCompetitions] = useState<CompetitionRow[]>([])
   const [fees, setFees] = useState<FeeRow[]>([])
   const [allFees, setAllFees] = useState<FeeRow[]>([])
   const [years, setYears] = useState<number[]>([])
   const [selectedYear, setSelectedYear] = useState<number | null>(null)
+  const [selectedTavling, setSelectedTavling] = useState<string>(ALLA_TAVLINGAR)
   const [latestTotal, setLatestTotal] = useState<TotRow | null>(null)
   const [totalHistory, setTotalHistory] = useState<TotRow[]>([])
   const [loading, setLoading] = useState(true)
   const [loadingFees, setLoadingFees] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [formFees, setFormFees] = useState<Record<string, number>>({})
+  const [formRules, setFormRules] = useState<Record<string, Record<string, number>>>({})
+  const [detailPlayer, setDetailPlayer] = useState<string | null>(null)
   const [password, setPassword] = useState("")
   const [submitting, setSubmitting] = useState(false)
-  const [regYear, setRegYear] = useState<number | null>(null)
+  const [regTavling, setRegTavling] = useState<string | null>(null)
   const [showAdmin, setShowAdmin] = useState(false)
 
   const loadMeta = useCallback(async () => {
@@ -157,7 +211,7 @@ export default function BoterPage() {
 
     const [
       { data: playersData, error: playersError },
-      { data: yearsData, error: yearsError },
+      { data: compData, error: compError },
       { data: totData, error: totError },
       { data: allFeesData, error: allFeesError },
     ] = await Promise.all([
@@ -167,15 +221,20 @@ export default function BoterPage() {
         .eq("aktiv", 1)
         .order("spelarnamn", { ascending: true }),
 
-      supabase.from(FEES_TABLE).select("ar").order("ar", { ascending: false }),
+      supabase
+        .from(COMPETITIONS_TABLE)
+        .select("datum, bana, host, major, plats, ar:år")
+        .order("datum", { ascending: false }),
 
       supabase.from(TOT_TABLE).select("datum, tot").order("datum", { ascending: true }),
 
-      supabase.from(FEES_TABLE).select("spelare, belopp:bötesbelopp, ar"),
+      supabase
+        .from(FEES_TABLE)
+        .select("spelare, belopp:bötesbelopp, ar, tavling_datum, regler"),
     ])
 
     if (playersError) throw playersError
-    if (yearsError) throw yearsError
+    if (compError) throw compError
     if (totError) throw totError
     if (allFeesError) throw allFeesError
 
@@ -192,22 +251,39 @@ export default function BoterPage() {
       return next
     })
 
-    const uniqYears = Array.from(
-      new Set(
-        (yearsData ?? [])
-          .map((r: { ar: number }) => Number(r.ar))
-          .filter((x) => Number.isFinite(x))
-      )
-    ).sort((a, b) => b - a)
+    const comps = ((compData ?? []) as CompetitionRow[]).map((c) => ({
+      ...c,
+      ar: Number(c.ar ?? c.datum?.slice(0, 4)),
+    }))
+
+    setCompetitions(comps)
+
+    const mappedAllFees = ((allFeesData ?? []) as FeeRow[]).map((r) => ({
+      spelare: r.spelare,
+      belopp: Number(r.belopp ?? 0),
+      ar: Number(r.ar),
+      tavling_datum: r.tavling_datum ?? null,
+      regler: (r.regler ?? null) as FeeRule[] | null,
+    }))
+
+    setAllFees(mappedAllFees)
 
     const currentYear = new Date().getFullYear()
-    const yearOptions = Array.from(new Set([...uniqYears, currentYear])).sort(
-      (a, b) => b - a
+
+    const yearOptions = Array.from(
+      new Set([
+        ...comps.map((c) => c.ar),
+        ...mappedAllFees.map((f) => f.ar),
+        currentYear,
+      ])
     )
+      .filter((x) => Number.isFinite(x))
+      .sort((a, b) => b - a)
 
     setYears(yearOptions)
     setSelectedYear((prev) => prev ?? yearOptions[0] ?? currentYear)
-    setRegYear((prev) => prev ?? currentYear)
+
+    setRegTavling((prev) => prev ?? comps[0]?.datum ?? null)
 
     const totalsHistory = ((totData ?? []) as TotRow[]).map((r) => ({
       datum: r.datum,
@@ -215,14 +291,8 @@ export default function BoterPage() {
     }))
 
     setTotalHistory(totalsHistory)
-    setLatestTotal(totalsHistory.length > 0 ? totalsHistory[totalsHistory.length - 1] : null)
-
-    setAllFees(
-      ((allFeesData ?? []) as FeeRow[]).map((r) => ({
-        spelare: r.spelare,
-        belopp: Number(r.belopp ?? 0),
-        ar: Number(r.ar),
-      }))
+    setLatestTotal(
+      totalsHistory.length > 0 ? totalsHistory[totalsHistory.length - 1] : null
     )
   }, [supabase])
 
@@ -234,8 +304,9 @@ export default function BoterPage() {
       try {
         const { data, error } = await supabase
           .from(FEES_TABLE)
-          .select("spelare, belopp:bötesbelopp, ar")
+          .select("spelare, belopp:bötesbelopp, ar, tavling_datum, regler")
           .eq("ar", year)
+          .order("tavling_datum", { ascending: true })
 
         if (error) throw error
 
@@ -244,6 +315,8 @@ export default function BoterPage() {
             spelare: r.spelare,
             belopp: Number(r.belopp ?? 0),
             ar: Number(r.ar),
+            tavling_datum: r.tavling_datum ?? null,
+            regler: (r.regler ?? null) as FeeRule[] | null,
           }))
         )
       } catch (e: any) {
@@ -283,10 +356,27 @@ export default function BoterPage() {
     loadFeesForYear(selectedYear)
   }, [selectedYear, loadFeesForYear])
 
+  useEffect(() => {
+    setSelectedTavling(ALLA_TAVLINGAR)
+  }, [selectedYear])
+
+  const compsForYear = useMemo(
+    () => competitions.filter((c) => c.ar === selectedYear),
+    [competitions, selectedYear]
+  )
+
+  const visibleFees = useMemo(
+    () =>
+      selectedTavling === ALLA_TAVLINGAR
+        ? fees
+        : fees.filter((f) => f.tavling_datum === selectedTavling),
+    [fees, selectedTavling]
+  )
+
   const totals = useMemo(() => {
     const map = new Map<string, number>()
 
-    for (const f of fees) {
+    for (const f of visibleFees) {
       map.set(f.spelare, (map.get(f.spelare) ?? 0) + Number(f.belopp ?? 0))
     }
 
@@ -300,11 +390,76 @@ export default function BoterPage() {
       leader: rows[0] ?? null,
       cleanPlayers: activePlayers.filter((p) => !map.has(p) || (map.get(p) ?? 0) === 0),
     }
-  }, [fees, activePlayers])
+  }, [visibleFees, activePlayers])
+
+  const perTavling = useMemo(() => {
+    const map = new Map<
+      string,
+      { summa: number; antalSpelare: number; antalBoter: number }
+    >()
+
+    for (const f of fees) {
+      if (!f.tavling_datum || f.belopp <= 0) continue
+
+      const rad = map.get(f.tavling_datum) ?? {
+        summa: 0,
+        antalSpelare: 0,
+        antalBoter: 0,
+      }
+
+      rad.summa += f.belopp
+      rad.antalSpelare += 1
+      rad.antalBoter += (f.regler ?? []).reduce((s, r) => s + Number(r.antal ?? 0), 0)
+
+      map.set(f.tavling_datum, rad)
+    }
+
+    return Array.from(map.entries())
+      .map(([datum, v]) => {
+        const comp = competitions.find((c) => c.datum === datum)
+
+        return {
+          datum,
+          label: shortDateSv(datum),
+          bana: comp?.bana ?? comp?.plats ?? "Okänd bana",
+          major: comp ? isMajor(comp.major) : false,
+          summa: Math.round(v.summa),
+          antalSpelare: v.antalSpelare,
+          antalBoter: v.antalBoter,
+        }
+      })
+      .sort((a, b) => a.datum.localeCompare(b.datum))
+  }, [fees, competitions])
+
+  const perRegel = useMemo(() => {
+    const map = new Map<string, { antal: number; summa: number }>()
+
+    for (const f of visibleFees) {
+      for (const r of f.regler ?? []) {
+        const rad = map.get(r.regel) ?? { antal: 0, summa: 0 }
+        rad.antal += Number(r.antal ?? 0)
+        rad.summa += Number(r.belopp ?? 0)
+        map.set(r.regel, rad)
+      }
+    }
+
+    return Array.from(map.entries())
+      .map(([regel, v]) => ({ regel, ...v }))
+      .sort((a, b) => b.summa - a.summa)
+  }, [visibleFees])
+
+  const varstaTavling = useMemo(
+    () =>
+      perTavling.length === 0
+        ? null
+        : perTavling.reduce((max, t) => (t.summa > max.summa ? t : max), perTavling[0]),
+    [perTavling]
+  )
 
   const hallOfShame = useMemo((): ShameRow[] => {
     const totalMap = new Map<string, number>()
     const yearMap = new Map<string, Set<number>>()
+    const compMap = new Map<string, Set<string>>()
 
     for (const f of allFees) {
       if (f.belopp <= 0) continue
@@ -314,17 +469,26 @@ export default function BoterPage() {
       const yearSet = yearMap.get(f.spelare) ?? new Set<number>()
       yearSet.add(f.ar)
       yearMap.set(f.spelare, yearSet)
+
+      if (f.tavling_datum) {
+        const compSet = compMap.get(f.spelare) ?? new Set<string>()
+        compSet.add(f.tavling_datum)
+        compMap.set(f.spelare, compSet)
+      }
     }
 
     return Array.from(totalMap.entries())
       .map(([spelare, total]) => {
         const antalAr = yearMap.get(spelare)?.size ?? 1
+        const antalTavlingar = compMap.get(spelare)?.size ?? 0
 
         return {
           spelare,
           total: Math.round(total),
           antalAr,
+          antalTavlingar,
           snittPerAr: total / antalAr,
+          snittPerTavling: antalTavlingar > 0 ? total / antalTavlingar : 0,
         }
       })
       .sort((a, b) => b.total - a.total)
@@ -344,31 +508,66 @@ export default function BoterPage() {
     [totalHistory]
   )
 
+  const periodLabel = useMemo(() => {
+    if (selectedTavling === ALLA_TAVLINGAR) return `År ${selectedYear ?? ""}`
+
+    const comp = competitions.find((c) => c.datum === selectedTavling)
+    return comp?.bana ?? formatDateSv(selectedTavling) ?? "Vald tävling"
+  }, [selectedTavling, selectedYear, competitions])
+
+  function setRuleCount(player: string, rule: Rule, antal: number) {
+    setFormRules((prev) => {
+      const next = { ...(prev[player] ?? {}), [rule.rule]: Math.max(0, antal) }
+
+      const summa = RULES.reduce((s, x) => s + (next[x.rule] ?? 0) * x.belopp, 0)
+      setFormFees((f) => ({ ...f, [player]: summa }))
+
+      return { ...prev, [player]: next }
+    })
+  }
+
   async function handleSubmit() {
-    if (!regYear) {
-      toast.error("Välj vilket år böterna ska registreras på.")
+    if (!regTavling) {
+      toast.error("Välj vilken tävling böterna ska registreras på.")
       return
     }
 
     setSubmitting(true)
 
     try {
-      const payload = activePlayers.map((p) => ({
-        spelare: p,
-        belopp: Number(formFees[p] ?? 0),
-        ar: regYear,
-      }))
+      const payload = activePlayers
+        .filter((p) => Number(formFees[p] ?? 0) > 0)
+        .map((p) => {
+          const valda = formRules[p] ?? {}
+
+          const regler = RULES.filter((r) => (valda[r.rule] ?? 0) > 0).map((r) => ({
+            regel: r.rule,
+            antal: valda[r.rule],
+            belopp: valda[r.rule] * r.belopp,
+          }))
+
+          return {
+            spelare: p,
+            belopp: Number(formFees[p]),
+            ar: Number(regTavling.slice(0, 4)),
+            tavling_datum: regTavling,
+            regler: regler.length > 0 ? regler : null,
+          }
+        })
+
+      if (payload.length === 0) {
+        toast.error("Inga böter att registrera – alla belopp är 0.")
+        return
+      }
 
       const res = await addFees({ fees: payload, password })
 
-      toast.success(`Uppdaterat! (insatt ${res.inserted} rader)`)
+      toast.success(`Böter sparade (${res.inserted} rader)`)
 
       setPassword("")
-      setFormFees((prev) => {
-        const next = { ...prev }
-        for (const p of activePlayers) next[p] = 0
-        return next
-      })
+      setFormFees(Object.fromEntries(activePlayers.map((p) => [p, 0])))
+      setFormRules({})
+      setDetailPlayer(null)
 
       await loadMeta()
       if (selectedYear) await loadFeesForYear(selectedYear)
@@ -399,7 +598,8 @@ export default function BoterPage() {
             </h1>
 
             <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground sm:text-base">
-              Följ årets böter, total böteskassa över tid och den historiska Hall of Shame.
+              Följ böterna tävling för tävling, total böteskassa över tid och den
+              historiska Hall of Shame.
             </p>
           </div>
 
@@ -409,13 +609,31 @@ export default function BoterPage() {
               onValueChange={(v) => setSelectedYear(Number(v))}
               disabled={years.length === 0}
             >
-              <SelectTrigger className="w-full sm:w-36">
+              <SelectTrigger className="w-full sm:w-32">
                 <SelectValue placeholder="Välj år" />
               </SelectTrigger>
               <SelectContent>
                 {years.map((y) => (
                   <SelectItem key={y} value={String(y)}>
                     {y}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select
+              value={selectedTavling}
+              onValueChange={setSelectedTavling}
+              disabled={compsForYear.length === 0}
+            >
+              <SelectTrigger className="w-full sm:w-56">
+                <SelectValue placeholder="Alla tävlingar" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALLA_TAVLINGAR}>Alla tävlingar</SelectItem>
+                {compsForYear.map((c) => (
+                  <SelectItem key={c.datum} value={c.datum}>
+                    {competitionLabel(c)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -456,7 +674,7 @@ export default function BoterPage() {
             />
 
             <StatCard
-              title={`År ${selectedYear ?? ""}`}
+              title={periodLabel}
               value={money(totals.totalAll)}
               sub="Summerat per spelare"
               icon={Banknote}
@@ -465,19 +683,19 @@ export default function BoterPage() {
             <StatCard
               title="Böteskung"
               value={totals.leader?.spelare ?? "Ingen"}
-              sub={totals.leader ? money(totals.leader.total) : "Inga böter i år"}
+              sub={totals.leader ? money(totals.leader.total) : "Inga böter registrerade"}
               icon={Crown}
             />
 
             <StatCard
-              title="Fläckfria"
-              value={`${totals.cleanPlayers.length} st`}
+              title="Dyraste tävlingen"
+              value={varstaTavling ? money(varstaTavling.summa) : "–"}
               sub={
-                totals.cleanPlayers.length > 0
-                  ? totals.cleanPlayers.slice(0, 3).join(", ")
-                  : "Alla har böter"
+                varstaTavling
+                  ? `${varstaTavling.bana} ${formatDateSv(varstaTavling.datum)}`
+                  : "Ingen tävlingsdata i år"
               }
-              icon={Trophy}
+              icon={Flame}
             />
           </section>
 
@@ -498,7 +716,7 @@ export default function BoterPage() {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-lg">
                   <BarChart3 className="h-5 w-5 text-primary" />
-                  Böter per spelare {selectedYear}
+                  Böter per spelare · {periodLabel}
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -506,7 +724,7 @@ export default function BoterPage() {
                   <div className="h-80 animate-pulse rounded-2xl bg-muted" />
                 ) : totals.rows.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
-                    Inga böter registrerade för {selectedYear ?? "valt år"}.
+                    Inga böter registrerade för {periodLabel.toLowerCase()}.
                   </p>
                 ) : (
                   <div className="grid gap-4 lg:grid-cols-[0.8fr_1.2fr]">
@@ -552,6 +770,81 @@ export default function BoterPage() {
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-lg">
+                  <CalendarDays className="h-5 w-5 text-primary" />
+                  Böter per tävling {selectedYear}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {perTavling.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    Inga böter är ännu registrerade på enskilda tävlingar detta år.
+                  </p>
+                ) : (
+                  <div className="flex flex-col gap-4">
+                    <div className="h-56">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={perTavling}>
+                          <CartesianGrid strokeDasharray="3 3" opacity={0.25} />
+                          <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                          <YAxis tick={{ fontSize: 12 }} />
+                          <Tooltip
+                            formatter={(value) => [money(Number(value)), "Böter"]}
+                            labelFormatter={(label) => `Tävling: ${label}`}
+                          />
+                          <Bar
+                            dataKey="summa"
+                            radius={[8, 8, 0, 0]}
+                            fill="var(--color-chart-2)"
+                          />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+
+                    <div className="flex flex-col gap-2">
+                      {perTavling
+                        .slice()
+                        .reverse()
+                        .map((t) => (
+                          <button
+                            key={t.datum}
+                            type="button"
+                            onClick={() => setSelectedTavling(t.datum)}
+                            className="flex items-center justify-between rounded-xl bg-secondary/30 px-3 py-2 text-left transition hover:bg-secondary/60"
+                          >
+                            <div>
+                              <div className="font-semibold text-foreground">
+                                {t.bana}
+                                {t.major && (
+                                  <span className="ml-2 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-bold text-primary">
+                                    Major
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                                <Users className="h-3 w-3" />
+                                {t.antalSpelare} spelare
+                                {t.antalBoter > 0 && ` · ${t.antalBoter} böter`}
+                                {" · "}
+                                {formatDateSv(t.datum)}
+                              </div>
+                            </div>
+
+                            <div className="font-bold tabular-nums text-foreground">
+                              {money(t.summa)}
+                            </div>
+                          </button>
+                        ))}
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </section>
+
+          <section className="grid gap-4 lg:grid-cols-[1fr_0.9fr]">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-lg">
                   <Flame className="h-5 w-5 text-primary" />
                   Total böteskassa över tid
                 </CardTitle>
@@ -586,6 +879,48 @@ export default function BoterPage() {
                 )}
               </CardContent>
             </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-lg">
+                  <Trophy className="h-5 w-5 text-primary" />
+                  Vanligaste böterna · {periodLabel}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {perRegel.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    Ingen böter är specificerad med regel ännu. Använd &quot;Specificera&quot;
+                    i adminläget så byggs statistiken upp härifrån.
+                  </p>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    {perRegel.map((r, idx) => (
+                      <div
+                        key={r.regel}
+                        className="flex items-center justify-between gap-4 rounded-xl bg-secondary/30 px-3 py-2"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-background text-sm font-black text-foreground">
+                            {idx + 1}
+                          </div>
+                          <div>
+                            <div className="font-semibold text-foreground">{r.regel}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {r.antal} gånger
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="font-bold tabular-nums text-foreground">
+                          {money(r.summa)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </section>
 
           <Card>
@@ -604,7 +939,7 @@ export default function BoterPage() {
                   >
                     <span className="font-medium text-foreground">{r.rule}</span>
                     <span className="shrink-0 rounded-full bg-primary/10 px-3 py-1 text-sm font-bold text-primary">
-                      {r.amount}
+                      {ruleLabel(r)}
                     </span>
                   </div>
                 ))}
@@ -618,7 +953,7 @@ export default function BoterPage() {
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <CardTitle className="flex items-center gap-2 text-lg">
                     <Lock className="h-5 w-5 text-primary" />
-                    Uppdatera böter
+                    Registrera böter
                   </CardTitle>
 
                   <Button
@@ -638,24 +973,26 @@ export default function BoterPage() {
 
               <CardContent className="space-y-5">
                 <p className="text-sm text-muted-foreground">
-                  Fyll i böter efter deltävlingen. Lämna 0 om ingen böter.
-                  Endast aktiva spelare visas.
+                  Välj tävling och fyll i böter per spelare. Spelare med 0 kr sparas inte.
+                  Vill du specificera vad böterna kommer från räknas beloppet ut
+                  automatiskt.
                 </p>
 
-                <div className="grid gap-4 md:grid-cols-3">
+                <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-2">
-                    <Label>Registrera böter på år</Label>
+                    <Label>Tävling</Label>
                     <Select
-                      value={regYear ? String(regYear) : undefined}
-                      onValueChange={(v) => setRegYear(Number(v))}
+                      value={regTavling ?? undefined}
+                      onValueChange={setRegTavling}
+                      disabled={competitions.length === 0}
                     >
                       <SelectTrigger>
-                        <SelectValue placeholder="Välj år" />
+                        <SelectValue placeholder="Välj tävling" />
                       </SelectTrigger>
                       <SelectContent>
-                        {years.map((y) => (
-                          <SelectItem key={y} value={String(y)}>
-                            {y}
+                        {competitions.map((c) => (
+                          <SelectItem key={c.datum} value={c.datum}>
+                            {competitionLabel(c)}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -664,26 +1001,79 @@ export default function BoterPage() {
                 </div>
 
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                  {activePlayers.map((p) => (
-                    <div
-                      key={p}
-                      className="rounded-2xl border border-border bg-secondary/25 p-4"
-                    >
-                      <Label>Böter för {p}</Label>
-                      <Input
-                        className="mt-2"
-                        type="number"
-                        value={formFees[p] ?? 0}
-                        onFocus={(e) => e.currentTarget.select()}
-                        onChange={(e) =>
-                          setFormFees((prev) => ({
-                            ...prev,
-                            [p]: Number(e.target.value),
-                          }))
-                        }
-                      />
-                    </div>
-                  ))}
+                  {activePlayers.map((p) => {
+                    const rules = formRules[p] ?? {}
+                    const beraknat = RULES.reduce(
+                      (s, r) => s + (rules[r.rule] ?? 0) * r.belopp,
+                      0
+                    )
+
+                    return (
+                      <div
+                        key={p}
+                        className="rounded-2xl border border-border bg-secondary/25 p-4"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <Label>Böter för {p}</Label>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setDetailPlayer((v) => (v === p ? null : p))}
+                          >
+                            {detailPlayer === p ? "Dölj" : "Specificera"}
+                          </Button>
+                        </div>
+
+                        <Input
+                          className="mt-2"
+                          type="number"
+                          value={formFees[p] ?? 0}
+                          onFocus={(e) => e.currentTarget.select()}
+                          onChange={(e) =>
+                            setFormFees((prev) => ({
+                              ...prev,
+                              [p]: Number(e.target.value),
+                            }))
+                          }
+                        />
+
+                        {detailPlayer === p && (
+                          <div className="mt-3 flex flex-col gap-2 border-t border-border pt-3">
+                            {RULES.map((r) => (
+                              <div
+                                key={r.rule}
+                                className="flex items-center justify-between gap-2"
+                              >
+                                <span className="text-sm leading-tight text-muted-foreground">
+                                  {r.rule}{" "}
+                                  <span className="text-xs font-semibold text-foreground">
+                                    ({ruleLabel(r)})
+                                  </span>
+                                </span>
+
+                                <Input
+                                  type="number"
+                                  min={0}
+                                  className="w-20 shrink-0"
+                                  value={rules[r.rule] ?? 0}
+                                  onFocus={(e) => e.currentTarget.select()}
+                                  onChange={(e) =>
+                                    setRuleCount(p, r, Number(e.target.value))
+                                  }
+                                />
+                              </div>
+                            ))}
+
+                            <div className="flex items-center justify-between border-t border-border pt-2 text-sm font-bold text-foreground">
+                              <span>Beräknat belopp</span>
+                              <span className="tabular-nums">{money(beraknat)}</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
                 </div>
 
                 <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
@@ -698,7 +1088,7 @@ export default function BoterPage() {
                   </div>
 
                   <Button onClick={handleSubmit} disabled={submitting}>
-                    {submitting ? "Sparar..." : "Uppdatera böter"}
+                    {submitting ? "Sparar..." : "Spara böter"}
                   </Button>
                 </div>
               </CardContent>
@@ -742,6 +1132,14 @@ function StatCard({
   )
 }
 
+function shameSubtitle(r: ShameRow) {
+  if (r.antalTavlingar > 0) {
+    return `~${money(Math.round(r.snittPerTavling))}/tävling · ${r.antalTavlingar} tävlingar`
+  }
+
+  return `~${money(Math.round(r.snittPerAr))}/år · ${r.antalAr} år`
+}
+
 function HallOfShame({ rows }: { rows: ShameRow[] }) {
   if (rows.length === 0) {
     return <p className="text-sm text-muted-foreground">Ingen böteshistorik hittades.</p>
@@ -768,7 +1166,7 @@ function HallOfShame({ rows }: { rows: ShameRow[] }) {
                   {r.spelare}
                 </div>
                 <div className="mt-1 text-sm text-muted-foreground">
-                  ~{money(Math.round(r.snittPerAr))}/år · {r.antalAr} år
+                  {shameSubtitle(r)}
                 </div>
               </div>
 
@@ -796,7 +1194,11 @@ function HallOfShame({ rows }: { rows: ShameRow[] }) {
                 </div>
                 <div>
                   <div className="font-semibold text-foreground">{r.spelare}</div>
-                  <div className="text-xs text-muted-foreground">{r.antalAr} år</div>
+                  <div className="text-xs text-muted-foreground">
+                    {r.antalTavlingar > 0
+                      ? `${r.antalTavlingar} tävlingar`
+                      : `${r.antalAr} år`}
+                  </div>
                 </div>
               </div>
 
